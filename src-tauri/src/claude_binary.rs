@@ -689,5 +689,16 @@ pub fn create_command_with_env(program: &str) -> Command {
         }
     }
 
+    // Ensure ~/.local/bin is in PATH (common install location for claude via npm/npx)
+    if let Ok(home) = std::env::var("HOME") {
+        let local_bin = format!("{}/.local/bin", home);
+        let current_path = std::env::var("PATH").unwrap_or_default();
+        if !current_path.contains(&local_bin) {
+            let new_path = format!("{}:{}", local_bin, current_path);
+            debug!("Adding ~/.local/bin to PATH: {}", local_bin);
+            cmd.env("PATH", new_path);
+        }
+    }
+
     cmd
 }
