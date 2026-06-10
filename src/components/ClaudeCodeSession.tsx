@@ -14,22 +14,17 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Popover } from "@/components/ui/popover";
 import { api, type Session } from "@/lib/api";
+import { apiCall } from "@/lib/apiAdapter";
 import { cn } from "@/lib/utils";
 
 // Conditional imports for Tauri APIs
-let tauriListen: any;
+import { listen as tauriListenImport } from "@tauri-apps/api/event";
 type UnlistenFn = () => void;
 
-try {
-  if (typeof window !== 'undefined' && window.__TAURI__) {
-    tauriListen = require("@tauri-apps/api/event").listen;
-  }
-} catch (e) {
-  console.log('[ClaudeCodeSession] Tauri APIs not available, using web mode');
-}
+console.log('[ClaudeCodeSession] BUILD v7 - Tauri listen imported:', typeof tauriListenImport);
 
 // Web-compatible replacements
-const listen = tauriListen || ((eventName: string, callback: (event: any) => void) => {
+const listen = tauriListenImport || ((eventName: string, callback: (event: any) => void) => {
   console.log('[ClaudeCodeSession] Setting up DOM event listener for:', eventName);
 
   // In web mode, listen for DOM events
@@ -495,14 +490,25 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
       return;
     }
 
-    // If already loading, queue the prompt
+    // If already loading, inject mid-turn (matching Claude TUI behavior)
     if (isLoading) {
-      const newPrompt = {
-        id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-        prompt,
-        model
-      };
-      setQueuedPrompts(prev => [...prev, newPrompt]);
+      console.log('[ClaudeCodeSession] BUILD v7 - mid-turn inject:', prompt);
+      try {
+        await apiCall('inject_claude_message', { message: prompt });
+        // Add the user message to the UI immediately
+        setMessages(prev => [...prev, {
+          type: 'user',
+          content: prompt,
+          timestamp: new Date().toISOString(),
+        } as any]);
+      } catch (e) {
+        console.error('[ClaudeCodeSession] inject failed, queuing instead:', e);
+        setQueuedPrompts(prev => [...prev, {
+          id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+          prompt,
+          model
+        }]);
+      }
       return;
     }
 
