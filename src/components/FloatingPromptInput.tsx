@@ -24,18 +24,12 @@ import { SlashCommandPicker } from "./SlashCommandPicker";
 import { ImagePreview } from "./ImagePreview";
 import { type FileEntry, type SlashCommand } from "@/lib/api";
 
-// Conditional import for Tauri webview window
-let tauriGetCurrentWebviewWindow: any;
-try {
-  if (typeof window !== 'undefined' && window.__TAURI__) {
-    tauriGetCurrentWebviewWindow = require("@tauri-apps/api/webviewWindow").getCurrentWebviewWindow;
-  }
-} catch (e) {
-  console.log('[FloatingPromptInput] Tauri webview API not available, using web mode');
-}
-
-// Web-compatible replacement
-const getCurrentWebviewWindow = tauriGetCurrentWebviewWindow || (() => ({ listen: () => Promise.resolve(() => {}) }));
+// Whether we're running inside the Tauri webview (vs plain browser/web mode).
+// NOTE: do NOT use `require(...)` here — in Vite's ESM bundle `require` is
+// undefined and throws, which previously caused the drag-drop listener to be
+// silently skipped. We dynamically `import()` the Tauri API where needed.
+const isTauri = (): boolean =>
+  typeof window !== 'undefined' && Boolean((window as any).__TAURI__);
 
 interface FloatingPromptInputProps {
   /**
@@ -70,6 +64,12 @@ interface FloatingPromptInputProps {
    * Extra menu items to display in the prompt bar
    */
   extraMenuItems?: React.ReactNode;
+  /**
+   * Whether this input belongs to the currently active tab.
+   * Only the active input handles drag-drop events to avoid duplicate
+   * insertions when multiple tabs are mounted simultaneously.
+   */
+  isActive?: boolean;
 }
 
 export interface FloatingPromptInputRef {
@@ -221,6 +221,7 @@ const FloatingPromptInputInner = (
     className,
     onCancel,
     extraMenuItems,
+    isActive = true,
   }: FloatingPromptInputProps,
   ref: React.Ref<FloatingPromptInputRef>,
 ) => {
@@ -358,6 +359,10 @@ const FloatingPromptInputInner = (
     }
   }, [prompt, projectPath, isExpanded]);
 
+  // Keep isActive accessible inside the stable drag-drop callback without re-registering
+  const isActiveRef = useRef(isActive);
+  useEffect(() => { isActiveRef.current = isActive; }, [isActive]);
+
   // Set up Tauri drag-drop event listener
   useEffect(() => {
     // This effect runs only once on component mount to set up the listener.
@@ -365,13 +370,23 @@ const FloatingPromptInputInner = (
 
     const setupListener = async () => {
       try {
+        // Native drag-drop is only available inside the Tauri webview.
+        if (!isTauri()) {
+          return;
+        }
+
         // If a listener from a previous mount/render is still around, clean it up.
         if (unlistenDragDropRef.current) {
           unlistenDragDropRef.current();
         }
 
+        // Dynamic import keeps this ESM-safe and avoids loading Tauri in web mode.
+        const { getCurrentWebviewWindow } = await import('@tauri-apps/api/webviewWindow');
         const webview = getCurrentWebviewWindow();
         unlistenDragDropRef.current = await webview.onDragDropEvent((event: any) => {
+          // Only the active tab's input handles drops to avoid duplicate insertions
+          if (!isActiveRef.current) return;
+
           if (event.payload.type === 'enter' || event.payload.type === 'over') {
             setDragActive(true);
           } else if (event.payload.type === 'leave') {
@@ -389,35 +404,36 @@ const FloatingPromptInputInner = (
 
             const droppedPaths = event.payload.paths as string[];
             const imagePaths = droppedPaths.filter(isImageFile);
+            const nonImagePaths = droppedPaths.filter(p => !isImageFile(p));
 
-            if (imagePaths.length > 0) {
-              setPrompt(currentPrompt => {
-                const existingPaths = extractImagePaths(currentPrompt);
-                const newPaths = imagePaths.filter(p => !existingPaths.includes(p));
+            setPrompt(currentPrompt => {
+              const existingPaths = extractImagePaths(currentPrompt);
+              const mentionParts: string[] = [];
 
-                if (newPaths.length === 0) {
-                  return currentPrompt; // All dropped images are already in the prompt
-                }
+              // Images go into preview via @mention (same as before)
+              const newImagePaths = imagePaths.filter(p => !existingPaths.includes(p));
+              for (const p of newImagePaths) {
+                mentionParts.push(p.includes(' ') ? `@"${p}"` : `@${p}`);
+              }
 
-                // Wrap paths with spaces in quotes for clarity
-                const mentionsToAdd = newPaths.map(p => {
-                  // If path contains spaces, wrap in quotes
-                  if (p.includes(' ')) {
-                    return `@"${p}"`;
-                  }
-                  return `@${p}`;
-                }).join(' ');
-                const newPrompt = currentPrompt + (currentPrompt.endsWith(' ') || currentPrompt === '' ? '' : ' ') + mentionsToAdd + ' ';
+              // Non-image files and folders are inserted as @path mentions
+              for (const p of nonImagePaths) {
+                mentionParts.push(p.includes(' ') ? `@"${p}"` : `@${p}`);
+              }
 
-                setTimeout(() => {
-                  const target = isExpanded ? expandedTextareaRef.current : textareaRef.current;
-                  target?.focus();
-                  target?.setSelectionRange(newPrompt.length, newPrompt.length);
-                }, 0);
+              if (mentionParts.length === 0) return currentPrompt;
 
-                return newPrompt;
-              });
-            }
+              const mentionsToAdd = mentionParts.join(' ');
+              const newPrompt = currentPrompt + (currentPrompt.endsWith(' ') || currentPrompt === '' ? '' : ' ') + mentionsToAdd + ' ';
+
+              setTimeout(() => {
+                const target = isExpanded ? expandedTextareaRef.current : textareaRef.current;
+                target?.focus();
+                target?.setSelectionRange(newPrompt.length, newPrompt.length);
+              }, 0);
+
+              return newPrompt;
+            });
           }
         });
       } catch (error) {
@@ -758,23 +774,30 @@ const FloatingPromptInputInner = (
       if (item.type.startsWith('image/')) {
         e.preventDefault();
         
-        // Get the image blob
         const blob = item.getAsFile();
         if (!blob) continue;
 
         try {
-          // Convert blob to base64
           const reader = new FileReader();
-          reader.onload = () => {
-            const base64Data = reader.result as string;
-            
-            // Add the base64 data URL directly to the prompt
+          reader.onload = async () => {
+            const dataUrl = reader.result as string;
+
+            // Try to save to a temp file so the prompt stays concise.
+            // Falls back to the raw data URL if the Tauri command is unavailable.
+            let imagePath: string | null = null;
+            try {
+              const { invoke } = await import('@tauri-apps/api/core');
+              imagePath = await invoke<string>('save_temp_image', { dataUrl });
+            } catch (_) {
+              // Web mode or command not available — use data URL directly
+            }
+
             setPrompt(currentPrompt => {
-              // Use the data URL directly as the image reference
-              const mention = `@"${base64Data}"`;
+              const mention = imagePath
+                ? (imagePath.includes(' ') ? `@"${imagePath}"` : `@${imagePath}`)
+                : `@"${dataUrl}"`;
               const newPrompt = currentPrompt + (currentPrompt.endsWith(' ') || currentPrompt === '' ? '' : ' ') + mention + ' ';
               
-              // Focus the textarea and move cursor to end
               setTimeout(() => {
                 const target = isExpanded ? expandedTextareaRef.current : textareaRef.current;
                 target?.focus();

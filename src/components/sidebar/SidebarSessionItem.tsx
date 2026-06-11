@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Pencil, Trash2, Check, X, AlertTriangle } from 'lucide-react';
+import { Pencil, Trash2, Check, X, AlertTriangle, EyeOff, ArchiveRestore } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import {
   Dialog,
@@ -16,12 +16,15 @@ interface SidebarSessionItemProps {
   session: Session;
   isActive: boolean;
   isRunning?: boolean;
+  isArchived?: boolean;
   displayName: string;
   onClick: () => void;
   onOpenInNewTab: () => void;
   onRefreshSessions: () => void;
   onDelete: (sessionId: string) => void;
   onRename: (sessionId: string, newName: string) => void;
+  onArchive: (sessionId: string) => void;
+  onUnarchive: (sessionId: string) => void;
 }
 
 function getSessionTimestampMs(session: Session): number {
@@ -35,12 +38,15 @@ export const SidebarSessionItem: React.FC<SidebarSessionItemProps> = ({
   session,
   isActive,
   isRunning = false,
+  isArchived = false,
   displayName,
   onClick,
   onOpenInNewTab,
   onRefreshSessions,
   onDelete,
   onRename,
+  onArchive,
+  onUnarchive,
 }) => {
   const [isHovered, setIsHovered] = useState(false);
   const [isRenaming, setIsRenaming] = useState(false);
@@ -89,6 +95,20 @@ export const SidebarSessionItem: React.FC<SidebarSessionItemProps> = ({
         action: () => { setRenameValue(displayName); setIsRenaming(true); },
       });
 
+      const archiveItem = await MenuItem.new({
+        id: isArchived ? 'unarchive-session' : 'archive-session',
+        text: isArchived ? 'Unarchive Session' : 'Archive Session',
+        action: async () => {
+          if (isArchived) {
+            await apiCall('unarchive_session', { sessionId: session.id });
+            onUnarchive(session.id);
+          } else {
+            await apiCall('archive_session', { sessionId: session.id });
+            onArchive(session.id);
+          }
+        },
+      });
+
       const deleteItem = await MenuItem.new({
         id: 'delete-session',
         text: 'Delete Session',
@@ -103,9 +123,8 @@ export const SidebarSessionItem: React.FC<SidebarSessionItemProps> = ({
         action: () => onRefreshSessions(),
       });
 
-      const menuItems: any[] = [openInNewTabItem, sep1, renameItem, deleteItem, sep2, reloadItem];
+      const menuItems: any[] = [openInNewTabItem, sep1, renameItem, archiveItem, deleteItem, sep2, reloadItem];
 
-      // Add "Inspect Element" only in dev mode
       if (import.meta.env.DEV) {
         const inspectItem = await MenuItem.new({
           id: 'inspect-element',
@@ -156,6 +175,16 @@ export const SidebarSessionItem: React.FC<SidebarSessionItemProps> = ({
     setConfirmDeleteOpen(true);
   };
 
+  const handleArchiveConfirm = async () => {
+    setConfirmDeleteOpen(false);
+    try {
+      await apiCall('archive_session', { sessionId: session.id });
+      onArchive(session.id);
+    } catch (err) {
+      console.error('[Sidebar] Failed to archive session:', err);
+    }
+  };
+
   const handleDeleteConfirm = async () => {
     setConfirmDeleteOpen(false);
     try {
@@ -178,12 +207,19 @@ export const SidebarSessionItem: React.FC<SidebarSessionItemProps> = ({
             <DialogTitle>Delete Session</DialogTitle>
           </div>
           <p className="text-sm text-muted-foreground pl-[52px]">
-            Are you sure you want to permanently delete{' '}
+            What would you like to do with{' '}
             <span className="font-semibold text-foreground">{displayName}</span>?
-            This cannot be undone.
+            Archive keeps the session out of the active list while preserving its history.
           </p>
         </DialogHeader>
         <div className="flex flex-col gap-2 mt-2">
+          <button
+            onClick={handleArchiveConfirm}
+            className="flex items-center justify-center gap-2 w-full px-4 py-2.5 rounded-md border border-border bg-background text-sm font-medium hover:bg-accent transition-colors"
+          >
+            <EyeOff size={14} className="text-muted-foreground" />
+            Archive session
+          </button>
           <button
             onClick={handleDeleteConfirm}
             className="flex items-center justify-center gap-2 w-full px-4 py-2.5 rounded-md bg-destructive text-destructive-foreground text-sm font-medium hover:bg-destructive/90 transition-colors"
@@ -206,7 +242,8 @@ export const SidebarSessionItem: React.FC<SidebarSessionItemProps> = ({
         'group flex items-center gap-1.5 px-2 py-1.5 rounded-md cursor-pointer text-sm transition-colors',
         isActive
           ? 'bg-primary/15 text-primary'
-          : 'text-muted-foreground hover:text-foreground hover:bg-accent/50'
+          : 'text-muted-foreground hover:text-foreground hover:bg-accent/50',
+        isArchived && 'opacity-60'
       )}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
@@ -244,6 +281,11 @@ export const SidebarSessionItem: React.FC<SidebarSessionItemProps> = ({
               title="Session is running"
             />
           )}
+          {isArchived && !isRunning && (
+            <span title="Archived">
+              <EyeOff size={10} className="shrink-0 text-muted-foreground/50" />
+            </span>
+          )}
           <div className="flex-1 min-w-0 flex items-baseline justify-between gap-1.5 overflow-hidden">
             <span className="truncate text-xs font-medium text-foreground/90 leading-tight">{displayName}</span>
             <span className="shrink-0 text-[10px] text-muted-foreground/60 leading-tight ml-auto">{relativeTime}</span>
@@ -258,13 +300,27 @@ export const SidebarSessionItem: React.FC<SidebarSessionItemProps> = ({
               >
                 <Pencil size={11} />
               </button>
-              <button
-                onClick={handleDeleteClick}
-                className="p-0.5 rounded hover:bg-destructive/20 text-muted-foreground hover:text-destructive transition-colors"
-                title="Delete session"
-              >
-                <Trash2 size={11} />
-              </button>
+              {isArchived ? (
+                <button
+                  onClick={async (e) => {
+                    e.stopPropagation();
+                    await apiCall('unarchive_session', { sessionId: session.id });
+                    onUnarchive(session.id);
+                  }}
+                  className="p-0.5 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition-colors"
+                  title="Unarchive session"
+                >
+                  <ArchiveRestore size={11} />
+                </button>
+              ) : (
+                <button
+                  onClick={handleDeleteClick}
+                  className="p-0.5 rounded hover:bg-destructive/20 text-muted-foreground hover:text-destructive transition-colors"
+                  title="Delete session"
+                >
+                  <Trash2 size={11} />
+                </button>
+              )}
             </div>
           )}
         </>

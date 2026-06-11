@@ -251,6 +251,7 @@ const TabPanel: React.FC<TabPanelProps> = ({ tab, isActive }) => {
             <ClaudeCodeSession
               session={tab.sessionData} // Pass the full session object if available
               initialProjectPath={tab.initialProjectPath || tab.sessionId}
+              isActive={isActive}
               onBack={() => {
                 // Go back to projects view in the same tab
                 updateTab(tab.id, {
