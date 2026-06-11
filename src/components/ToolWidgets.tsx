@@ -47,6 +47,7 @@ import {
   LayoutList,
   Activity,
   Hash,
+  Loader2,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
@@ -63,6 +64,116 @@ import { open } from "@tauri-apps/plugin-shell";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
 import { motion, AnimatePresence } from "framer-motion";
+
+/**
+ * Module-level memory of the user's manual expand/collapse toggles, keyed by a
+ * stable id (e.g. a tool_use_id). This survives virtual-scroll unmounts and
+ * streaming re-renders, so a card the user explicitly opened/closed keeps that
+ * state instead of being overridden by the auto-expand logic.
+ */
+const toolCardExpandMemory = new Map<string, boolean>();
+
+export type ToolCardStatus = "running" | "success" | "error" | "idle";
+
+interface CollapsibleToolCardProps {
+  /** Stable id (e.g. tool_use_id) used to remember the user's manual toggle. */
+  memoryId?: string;
+  /** Tool name shown in muted color at the start of the row, e.g. "Bash". */
+  label: React.ReactNode;
+  /** The primary value/preview shown after the "/" separator. */
+  preview?: React.ReactNode;
+  /** Execution status, drives the trailing badge. */
+  status?: ToolCardStatus;
+  /** Auto-expand state driven by app logic (e.g. the latest running tool). */
+  defaultExpanded?: boolean;
+  /** Tailwind class for the colored left accent bar, e.g. "border-l-green-500". */
+  borderClass?: string;
+  /** Tailwind class for the preview text color. */
+  valueClass?: string;
+  children: React.ReactNode;
+  className?: string;
+}
+
+/**
+ * A compact, collapsible wrapper for execution-type blocks (tool calls, tool
+ * results, MCP invocations, system init), styled after claudecodeui: a single
+ * `name / value` row with a colored left accent bar keyed to the tool category,
+ * no surrounding box. Collapsed by default; the latest running tool
+ * auto-expands. A user's manual toggle is remembered via
+ * {@link toolCardExpandMemory} and takes precedence over the auto-expand logic.
+ */
+export const CollapsibleToolCard: React.FC<CollapsibleToolCardProps> = ({
+  memoryId,
+  label,
+  preview,
+  status = "idle",
+  defaultExpanded = false,
+  borderClass,
+  valueClass,
+  children,
+  className,
+}) => {
+  const [userOverride, setUserOverride] = useState<boolean | undefined>(() =>
+    memoryId ? toolCardExpandMemory.get(memoryId) : undefined
+  );
+
+  // User override wins; otherwise follow the app-driven default.
+  const expanded = userOverride !== undefined ? userOverride : defaultExpanded;
+
+  const toggle = () => {
+    const next = !expanded;
+    setUserOverride(next);
+    if (memoryId) toolCardExpandMemory.set(memoryId, next);
+  };
+
+  // Success is intentionally badge-less to keep the timeline quiet; only
+  // in-flight and failed calls get a pill.
+  const statusBadge = (() => {
+    if (status === "running") {
+      return (
+        <span className="inline-flex items-center gap-1 rounded px-1.5 py-px text-[10px] font-medium bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
+          <Loader2 className="h-2.5 w-2.5 animate-spin" />
+          Running
+        </span>
+      );
+    }
+    if (status === "error") {
+      return (
+        <span className="inline-flex items-center rounded px-1.5 py-px text-[10px] font-medium bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300">
+          Error
+        </span>
+      );
+    }
+    return null;
+  })();
+
+  return (
+    <div
+      className={cn("border-l-2 my-0.5 pl-3", borderClass || "border-l-border", className)}
+    >
+      <button
+        type="button"
+        onClick={toggle}
+        aria-expanded={expanded}
+        className="group flex w-full items-center gap-1.5 py-0.5 text-left text-xs"
+      >
+        <ChevronRight
+          className={cn(
+            "h-3 w-3 flex-shrink-0 text-muted-foreground transition-transform duration-150",
+            expanded && "rotate-90"
+          )}
+        />
+        <span className="flex-shrink-0 font-medium text-muted-foreground">{label}</span>
+        <span className="flex-shrink-0 text-[10px] text-muted-foreground/40">/</span>
+        <span className={cn("min-w-0 flex-1 truncate font-mono", valueClass || "text-foreground")}>
+          {preview}
+        </span>
+        {statusBadge && <span className="ml-auto flex-shrink-0 pl-1">{statusBadge}</span>}
+      </button>
+      {expanded && <div className="mt-1.5 pl-[18px]">{children}</div>}
+    </div>
+  );
+};
 
 /**
  * Widget for TodoWrite tool - displays a beautiful TODO list

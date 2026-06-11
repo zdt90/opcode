@@ -109,12 +109,10 @@ export const MessageList: React.FC<MessageListProps> = React.memo(({
             const key = `msg-${virtualItem.index}-${message.type}`;
             
             return (
-              <motion.div
+              <div
                 key={key}
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, scale: 0.95 }}
-                transition={{ duration: 0.2 }}
+                data-index={virtualItem.index}
+                ref={virtualizer.measureElement}
                 style={{
                   position: 'absolute',
                   top: 0,
@@ -123,14 +121,22 @@ export const MessageList: React.FC<MessageListProps> = React.memo(({
                   transform: `translateY(${virtualItem.start}px)`,
                 }}
               >
-                <div className="px-4 py-2">
-                  <StreamMessage 
-                    message={message}
-                    streamMessages={messages}
-                    onLinkDetected={onLinkDetected}
-                  />
-                </div>
-              </motion.div>
+                <motion.div
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.95 }}
+                  transition={{ duration: 0.2 }}
+                >
+                  <div className="px-4 py-2">
+                    <StreamMessage 
+                      message={message}
+                      streamMessages={messages}
+                      onLinkDetected={onLinkDetected}
+                      isStreaming={isStreaming}
+                    />
+                  </div>
+                </motion.div>
+              </div>
             );
           })}
         </AnimatePresence>

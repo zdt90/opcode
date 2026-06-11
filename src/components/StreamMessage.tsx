@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { 
   Terminal, 
   User, 
@@ -40,8 +40,89 @@ import {
   LSResultWidget,
   ThinkingWidget,
   WebSearchWidget,
-  WebFetchWidget
+  WebFetchWidget,
+  CollapsibleToolCard,
+  type ToolCardStatus
 } from "./ToolWidgets";
+
+/** Truncate a string for use in a one-line collapsed summary. */
+const truncatePreview = (value: unknown, max = 80): string => {
+  if (value === undefined || value === null) return "";
+  const str = typeof value === "string" ? value : JSON.stringify(value);
+  const firstLine = str.split("\n")[0];
+  return firstLine.length > max ? `${firstLine.slice(0, max)}…` : firstLine;
+};
+
+/**
+ * Per-category accent colors for the collapsible tool row, mirroring
+ * claudecodeui: a colored left bar plus a matching value text color. Full
+ * Tailwind class strings are written out so the JIT compiler picks them up.
+ */
+const ACCENT = {
+  amber: { border: "border-l-amber-500 dark:border-l-amber-400", value: "text-primary" },
+  green: { border: "border-l-green-500 dark:border-l-green-400", value: "text-green-600 dark:text-green-400" },
+  slate: { border: "border-l-slate-400 dark:border-l-slate-500", value: "text-foreground" },
+  slateLink: { border: "border-l-slate-400 dark:border-l-slate-500", value: "text-primary" },
+  violet: { border: "border-l-violet-500 dark:border-l-violet-400", value: "text-violet-600 dark:text-violet-400" },
+  purple: { border: "border-l-purple-500 dark:border-l-purple-400", value: "text-purple-600 dark:text-purple-400" },
+  blue: { border: "border-l-blue-500 dark:border-l-blue-400", value: "text-blue-600 dark:text-blue-400" },
+  gray: { border: "border-l-border", value: "text-muted-foreground" },
+} as const;
+
+type ToolSummary = { label: string; preview: string; borderClass: string; valueClass: string };
+
+/**
+ * Produce a compact one-line summary (label + preview + accent colors) for a
+ * tool call, used as the collapsed header of {@link CollapsibleToolCard}.
+ */
+const getToolSummary = (name: string | undefined, input: any): ToolSummary => {
+  const mk = (label: string, preview: string, accent: { border: string; value: string }): ToolSummary => ({
+    label,
+    preview,
+    borderClass: accent.border,
+    valueClass: accent.value,
+  });
+
+  if (name?.startsWith("mcp__")) {
+    const parts = name.split("__");
+    const ns = parts[1] || "";
+    const method = parts[2] || "";
+    const hint = input?.query ?? input?.url ?? input?.path ?? "";
+    return mk("MCP", [ns, method].filter(Boolean).join(" · ") + (hint ? `  ${truncatePreview(hint, 50)}` : ""), ACCENT.violet);
+  }
+
+  const lower = name?.toLowerCase();
+  switch (lower) {
+    case "task":
+      return mk("Task", truncatePreview(input?.description), ACCENT.purple);
+    case "edit":
+      return mk("Edit", truncatePreview(input?.file_path), ACCENT.amber);
+    case "multiedit":
+      return mk("MultiEdit", truncatePreview(input?.file_path), ACCENT.amber);
+    case "write":
+      return mk("Write", truncatePreview(input?.file_path), ACCENT.amber);
+    case "read":
+      return mk("Read", truncatePreview(input?.file_path), ACCENT.slateLink);
+    case "ls":
+      return mk("LS", truncatePreview(input?.path), ACCENT.slate);
+    case "glob":
+      return mk("Glob", truncatePreview(input?.pattern), ACCENT.slate);
+    case "grep":
+      return mk("Grep", truncatePreview(input?.pattern), ACCENT.slate);
+    case "bash":
+      return mk("Bash", truncatePreview(input?.command || input?.description), ACCENT.green);
+    case "todowrite":
+      return mk("TodoWrite", `${input?.todos?.length ?? 0} items`, ACCENT.violet);
+    case "todoread":
+      return mk("TodoRead", "", ACCENT.violet);
+    case "websearch":
+      return mk("WebSearch", truncatePreview(input?.query), ACCENT.blue);
+    case "webfetch":
+      return mk("WebFetch", truncatePreview(input?.url), ACCENT.blue);
+    default:
+      return mk(name || "Tool", truncatePreview(input), ACCENT.gray);
+  }
+};
 
 /**
  * A fenced code block rendered with syntax highlighting and a copy-to-clipboard
@@ -112,12 +193,18 @@ interface StreamMessageProps {
   className?: string;
   streamMessages: ClaudeStreamMessage[];
   onLinkDetected?: (url: string) => void;
+  /**
+   * Whether the session is currently streaming. When true, the latest
+   * not-yet-completed tool call is auto-expanded; all other tool cards stay
+   * collapsed.
+   */
+  isStreaming?: boolean;
 }
 
 /**
  * Component to render a single Claude Code stream message
  */
-const StreamMessageComponent: React.FC<StreamMessageProps> = ({ message, className, streamMessages, onLinkDetected }) => {
+const StreamMessageComponent: React.FC<StreamMessageProps> = ({ message, className, streamMessages, onLinkDetected, isStreaming = false }) => {
   // State to track tool results mapped by tool call ID
   const [toolResults, setToolResults] = useState<Map<string, any>>(new Map());
   
@@ -148,6 +235,39 @@ const StreamMessageComponent: React.FC<StreamMessageProps> = ({ message, classNa
     if (!toolId) return null;
     return toolResults.get(toolId) || null;
   };
+
+  // Determine the latest "running" tool: the last tool_use across the whole
+  // stream that has no corresponding tool_result yet. Only meaningful while
+  // streaming; this is the single card that should auto-expand.
+  const activeToolUseId = useMemo<string | null>(() => {
+    if (!isStreaming) return null;
+
+    const resultIds = new Set<string>();
+    streamMessages.forEach((msg) => {
+      if (msg.type === "user" && Array.isArray(msg.message?.content)) {
+        msg.message.content.forEach((c: any) => {
+          if (c.type === "tool_result" && c.tool_use_id) resultIds.add(c.tool_use_id);
+        });
+      }
+    });
+
+    let last: string | null = null;
+    streamMessages.forEach((msg) => {
+      if (msg.type === "assistant" && Array.isArray(msg.message?.content)) {
+        msg.message.content.forEach((c: any) => {
+          if (c.type === "tool_use" && c.id && !resultIds.has(c.id)) last = c.id;
+        });
+      }
+    });
+    return last;
+  }, [streamMessages, isStreaming]);
+
+  // Compute the status badge for a tool given its result/active state.
+  const getToolStatus = (toolId: string | undefined, result: any): ToolCardStatus => {
+    if (toolId && toolId === activeToolUseId) return "running";
+    if (result) return result.is_error ? "error" : "success";
+    return "idle";
+  };
   
   try {
     // Skip rendering for meta messages that don't have meaningful content
@@ -163,12 +283,22 @@ const StreamMessageComponent: React.FC<StreamMessageProps> = ({ message, classNa
     // System initialization message
     if (message.type === "system" && message.subtype === "init") {
       return (
-        <SystemInitializedWidget
-          sessionId={message.session_id}
-          model={message.model}
-          cwd={message.cwd}
-          tools={message.tools}
-        />
+        <CollapsibleToolCard
+          memoryId={message.session_id ? `init:${message.session_id}` : "init"}
+          label="System Initialized"
+          preview={truncatePreview(message.model || message.session_id || "")}
+          borderClass="border-l-slate-400 dark:border-l-slate-500"
+          valueClass="text-muted-foreground"
+          status="idle"
+          defaultExpanded={false}
+        >
+          <SystemInitializedWidget
+            sessionId={message.session_id}
+            model={message.model}
+            cwd={message.cwd}
+            tools={message.tools}
+          />
+        </CollapsibleToolCard>
       );
     }
 
@@ -178,13 +308,15 @@ const StreamMessageComponent: React.FC<StreamMessageProps> = ({ message, classNa
       
       let renderedSomething = false;
       
-      const renderedCard = (
-        <Card className={cn("border-primary/20 bg-primary/5", className)}>
-          <CardContent className="p-4">
-            <div className="flex items-start gap-3">
-              <Bot className="h-5 w-5 text-primary mt-0.5" />
-              <div className="flex-1 space-y-2 min-w-0">
-                {msg.content && Array.isArray(msg.content) && msg.content.map((content: any, idx: number) => {
+      const contentArr = Array.isArray(msg.content) ? msg.content : [];
+      // A message containing only tool calls (no prose/thinking) is rendered
+      // without the assistant card chrome, matching claudecodeui's compact
+      // timeline. Messages with text keep the card + avatar.
+      const toolOnly = contentArr.length > 0 && !contentArr.some((c: any) => c.type === "text" || c.type === "thinking");
+
+      const body = (
+        <div className={cn("min-w-0", toolOnly ? "space-y-0.5" : "flex-1 space-y-2")}>
+                {contentArr.map((content: any, idx: number) => {
                   // Text content - render as markdown
                   if (content.type === "text") {
                     // Ensure we have a string to render
@@ -317,17 +449,12 @@ const StreamMessageComponent: React.FC<StreamMessageProps> = ({ message, classNa
                       return null;
                     };
                     
-                    // Render the tool widget
+                    // Render the tool widget (or a basic fallback display)
                     const widget = renderToolWidget();
-                    if (widget) {
-                      renderedSomething = true;
-                      return <div key={idx}>{widget}</div>;
-                    }
-                    
-                    // Fallback to basic tool display
                     renderedSomething = true;
-                    return (
-                      <div key={idx} className="space-y-2">
+
+                    const innerContent = widget ?? (
+                      <div className="space-y-2">
                         <div className="flex items-center gap-2">
                           <Terminal className="h-4 w-4 text-muted-foreground" />
                           <span className="text-sm font-medium">
@@ -335,7 +462,7 @@ const StreamMessageComponent: React.FC<StreamMessageProps> = ({ message, classNa
                           </span>
                         </div>
                         {content.input && (
-                          <div className="ml-6 p-2 bg-background rounded-md border">
+                          <div className="p-2 bg-background rounded-md border">
                             <pre className="text-xs font-mono overflow-x-auto">
                               {JSON.stringify(content.input, null, 2)}
                             </pre>
@@ -343,24 +470,55 @@ const StreamMessageComponent: React.FC<StreamMessageProps> = ({ message, classNa
                         )}
                       </div>
                     );
+
+                    const summary = getToolSummary(content.name, input);
+                    const isActive = toolId != null && toolId === activeToolUseId;
+
+                    return (
+                      <div key={idx}>
+                        <CollapsibleToolCard
+                          memoryId={toolId}
+                          label={summary.label}
+                          preview={summary.preview}
+                          borderClass={summary.borderClass}
+                          valueClass={summary.valueClass}
+                          status={getToolStatus(toolId, toolResult)}
+                          defaultExpanded={isActive}
+                        >
+                          {innerContent}
+                        </CollapsibleToolCard>
+                      </div>
+                    );
                   }
                   
                   return null;
                 })}
                 
-                {msg.usage && (
+                {!toolOnly && msg.usage && (
                   <div className="text-xs text-muted-foreground mt-2">
                     Tokens: {msg.usage.input_tokens} in, {msg.usage.output_tokens} out
                   </div>
                 )}
-              </div>
+        </div>
+      );
+
+      if (!renderedSomething) return null;
+
+      // Tool-only messages: no card, no avatar, no token row — just the rows.
+      if (toolOnly) {
+        return <div className={cn("py-0.5", className)}>{body}</div>;
+      }
+
+      return (
+        <Card className={cn("border-primary/20 bg-primary/5", className)}>
+          <CardContent className="p-4">
+            <div className="flex items-start gap-3">
+              <Bot className="h-5 w-5 text-primary mt-0.5" />
+              {body}
             </div>
           </CardContent>
         </Card>
       );
-      
-      if (!renderedSomething) return null;
-      return renderedCard;
     }
 
     // User message - handle both nested and direct content structures
@@ -370,15 +528,51 @@ const StreamMessageComponent: React.FC<StreamMessageProps> = ({ message, classNa
 
       // Handle different message structures
       const msg = message.message || message;
-      
+
+      // Claude stores compact/continuation summaries as synthetic "user" rows
+      // flagged with isCompactSummary. They are really assistant-authored
+      // context, so render them as a collapsible summary instead of a user
+      // message. (See claudecodeui's claude-sessions provider for reference.)
+      const isCompactSummary =
+        (message as any).isCompactSummary === true || (msg as any)?.isCompactSummary === true;
+      if (isCompactSummary) {
+        const raw = msg.content;
+        const summaryText =
+          typeof raw === "string"
+            ? raw
+            : Array.isArray(raw)
+            ? raw.map((c: any) => (typeof c === "string" ? c : c.text || "")).join("\n")
+            : String(raw ?? "");
+        if (!summaryText.trim()) return null;
+        return (
+          <CollapsibleToolCard
+            memoryId={(message as any).uuid ? `summary:${(message as any).uuid}` : undefined}
+            label="Context Summary"
+            preview={truncatePreview(summaryText)}
+            borderClass="border-l-indigo-400 dark:border-l-indigo-500"
+            valueClass="text-muted-foreground"
+            status="idle"
+            defaultExpanded={false}
+          >
+            <div className="prose prose-sm dark:prose-invert max-w-none">
+              <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents(syntaxTheme)}>
+                {summaryText}
+              </ReactMarkdown>
+            </div>
+          </CollapsibleToolCard>
+        );
+      }
+
+      const userContentArr = Array.isArray(msg.content) ? msg.content : [];
+      // A user row that only carries tool_results (Claude nests them under the
+      // user role) is not a real user message: render the results inline with
+      // no user-card chrome, matching claudecodeui.
+      const userToolOnly = userContentArr.length > 0 && userContentArr.every((c: any) => c.type === "tool_result");
+
       let renderedSomething = false;
       
-      const renderedCard = (
-        <Card className={cn("border-muted-foreground/20 bg-muted/20", className)}>
-          <CardContent className="p-4">
-            <div className="flex items-start gap-3">
-              <User className="h-5 w-5 text-muted-foreground mt-0.5" />
-              <div className="flex-1 space-y-2 min-w-0">
+      const body = (
+        <div className={cn("min-w-0", userToolOnly ? "space-y-0.5" : "flex-1 space-y-2")}>
                 {/* Handle content that is a simple string (e.g. from user commands) */}
                 {(typeof msg.content === 'string' || (msg.content && !Array.isArray(msg.content))) && (
                   (() => {
@@ -460,93 +654,27 @@ const StreamMessageComponent: React.FC<StreamMessageProps> = ({ message, classNa
                       }
                     }
                     
-                    // Always show system reminders regardless of widget status
+                    // Build inner content + title once, then wrap in a single
+                    // collapsible card so tool results stay compact by default.
+                    let resultTitle = "Tool Result";
+                    let resultInner: React.ReactNode;
+
                     const reminderMatch = contentText.match(/<system-reminder>(.*?)<\/system-reminder>/s);
-                    if (reminderMatch) {
-                      const reminderMessage = reminderMatch[1].trim();
-                      const beforeReminder = contentText.substring(0, reminderMatch.index || 0).trim();
-                      const afterReminder = contentText.substring((reminderMatch.index || 0) + reminderMatch[0].length).trim();
-                      
-                      renderedSomething = true;
-                      return (
-                        <div key={idx} className="space-y-2">
-                          <div className="flex items-center gap-2">
-                            <CheckCircle2 className="h-4 w-4 text-green-500" />
-                            <span className="text-sm font-medium">Tool Result</span>
-                          </div>
-                          
-                          {beforeReminder && (
-                            <div className="ml-6 p-2 bg-background rounded-md border">
-                              <pre className="text-xs font-mono overflow-x-auto whitespace-pre-wrap">
-                                {beforeReminder}
-                              </pre>
-                            </div>
-                          )}
-                          
-                          <div className="ml-6">
-                            <SystemReminderWidget message={reminderMessage} />
-                          </div>
-                          
-                          {afterReminder && (
-                            <div className="ml-6 p-2 bg-background rounded-md border">
-                              <pre className="text-xs font-mono overflow-x-auto whitespace-pre-wrap">
-                                {afterReminder}
-                              </pre>
-                            </div>
-                          )}
-                        </div>
-                      );
-                    }
-                    
-                    // Check if this is an Edit tool result
                     const isEditResult = contentText.includes("has been updated. Here's the result of running `cat -n`");
-                    
-                    if (isEditResult) {
-                      renderedSomething = true;
-                      return (
-                        <div key={idx} className="space-y-2">
-                          <div className="flex items-center gap-2">
-                            <CheckCircle2 className="h-4 w-4 text-green-500" />
-                            <span className="text-sm font-medium">Edit Result</span>
-                          </div>
-                          <EditResultWidget content={contentText} />
-                        </div>
-                      );
-                    }
-                    
-                    // Check if this is a MultiEdit tool result
-                    const isMultiEditResult = contentText.includes("has been updated with multiple edits") || 
+                    const isMultiEditResult = contentText.includes("has been updated with multiple edits") ||
                                              contentText.includes("MultiEdit completed successfully") ||
                                              contentText.includes("Applied multiple edits to");
-                    
-                    if (isMultiEditResult) {
-                      renderedSomething = true;
-                      return (
-                        <div key={idx} className="space-y-2">
-                          <div className="flex items-center gap-2">
-                            <CheckCircle2 className="h-4 w-4 text-green-500" />
-                            <span className="text-sm font-medium">MultiEdit Result</span>
-                          </div>
-                          <MultiEditResultWidget content={contentText} />
-                        </div>
-                      );
-                    }
-                    
-                    // Check if this is an LS tool result (directory tree structure)
+
+                    // LS tool result (directory tree structure)
                     const isLSResult = (() => {
                       if (!content.tool_use_id || typeof contentText !== 'string') return false;
-                      
-                      // Check if this result came from an LS tool by looking for the tool call
                       let isFromLSTool = false;
-                      
-                      // Search in previous assistant messages for the matching tool_use
                       if (streamMessages) {
                         for (let i = streamMessages.length - 1; i >= 0; i--) {
                           const prevMsg = streamMessages[i];
-                          // Only check assistant messages
                           if (prevMsg.type === 'assistant' && prevMsg.message?.content && Array.isArray(prevMsg.message.content)) {
-                            const toolUse = prevMsg.message.content.find((c: any) => 
-                              c.type === 'tool_use' && 
+                            const toolUse = prevMsg.message.content.find((c: any) =>
+                              c.type === 'tool_use' &&
                               c.id === content.tool_use_id &&
                               c.name?.toLowerCase() === 'ls'
                             );
@@ -557,47 +685,55 @@ const StreamMessageComponent: React.FC<StreamMessageProps> = ({ message, classNa
                           }
                         }
                       }
-                      
-                      // Only proceed if this is from an LS tool
                       if (!isFromLSTool) return false;
-                      
-                      // Additional validation: check for tree structure pattern
                       const lines = contentText.split('\n');
                       const hasTreeStructure = lines.some(line => /^\s*-\s+/.test(line));
                       const hasNoteAtEnd = lines.some(line => line.trim().startsWith('NOTE: do any of the files'));
-                      
                       return hasTreeStructure || hasNoteAtEnd;
                     })();
-                    
-                    if (isLSResult) {
-                      renderedSomething = true;
-                      return (
-                        <div key={idx} className="space-y-2">
-                          <div className="flex items-center gap-2">
-                            <CheckCircle2 className="h-4 w-4 text-green-500" />
-                            <span className="text-sm font-medium">Directory Contents</span>
-                          </div>
-                          <LSResultWidget content={contentText} />
+
+                    // Read tool result (contains line numbers with arrow separator)
+                    const isReadResult = content.tool_use_id && typeof contentText === 'string' &&
+                      /^\s*\d+→/.test(contentText);
+
+                    if (reminderMatch) {
+                      resultTitle = "System Reminder";
+                      const reminderMessage = reminderMatch[1].trim();
+                      const beforeReminder = contentText.substring(0, reminderMatch.index || 0).trim();
+                      const afterReminder = contentText.substring((reminderMatch.index || 0) + reminderMatch[0].length).trim();
+                      resultInner = (
+                        <div className="space-y-2">
+                          {beforeReminder && (
+                            <div className="p-2 bg-background rounded-md border">
+                              <pre className="text-xs font-mono overflow-x-auto whitespace-pre-wrap">{beforeReminder}</pre>
+                            </div>
+                          )}
+                          <SystemReminderWidget message={reminderMessage} />
+                          {afterReminder && (
+                            <div className="p-2 bg-background rounded-md border">
+                              <pre className="text-xs font-mono overflow-x-auto whitespace-pre-wrap">{afterReminder}</pre>
+                            </div>
+                          )}
                         </div>
                       );
-                    }
-                    
-                    // Check if this is a Read tool result (contains line numbers with arrow separator)
-                    const isReadResult = content.tool_use_id && typeof contentText === 'string' && 
-                      /^\s*\d+→/.test(contentText);
-                    
-                    if (isReadResult) {
-                      // Try to find the corresponding Read tool call to get the file path
+                    } else if (isEditResult) {
+                      resultTitle = "Edit Result";
+                      resultInner = <EditResultWidget content={contentText} />;
+                    } else if (isMultiEditResult) {
+                      resultTitle = "MultiEdit Result";
+                      resultInner = <MultiEditResultWidget content={contentText} />;
+                    } else if (isLSResult) {
+                      resultTitle = "Directory Contents";
+                      resultInner = <LSResultWidget content={contentText} />;
+                    } else if (isReadResult) {
+                      resultTitle = "Read Result";
                       let filePath: string | undefined;
-                      
-                      // Search in previous assistant messages for the matching tool_use
                       if (streamMessages) {
                         for (let i = streamMessages.length - 1; i >= 0; i--) {
                           const prevMsg = streamMessages[i];
-                          // Only check assistant messages
                           if (prevMsg.type === 'assistant' && prevMsg.message?.content && Array.isArray(prevMsg.message.content)) {
-                            const toolUse = prevMsg.message.content.find((c: any) => 
-                              c.type === 'tool_use' && 
+                            const toolUse = prevMsg.message.content.find((c: any) =>
+                              c.type === 'tool_use' &&
                               c.id === content.tool_use_id &&
                               c.name?.toLowerCase() === 'read'
                             );
@@ -608,51 +744,35 @@ const StreamMessageComponent: React.FC<StreamMessageProps> = ({ message, classNa
                           }
                         }
                       }
-                      
-                      renderedSomething = true;
-                      return (
-                        <div key={idx} className="space-y-2">
-                          <div className="flex items-center gap-2">
-                            <CheckCircle2 className="h-4 w-4 text-green-500" />
-                            <span className="text-sm font-medium">Read Result</span>
-                          </div>
-                          <ReadResultWidget content={contentText} filePath={filePath} />
+                      resultInner = <ReadResultWidget content={contentText} filePath={filePath} />;
+                    } else if (!contentText || contentText.trim() === '') {
+                      resultInner = (
+                        <div className="p-3 bg-muted/50 rounded-md border text-sm text-muted-foreground italic">
+                          Tool did not return any output
+                        </div>
+                      );
+                    } else {
+                      resultInner = (
+                        <div className="p-2 bg-background rounded-md border">
+                          <pre className="text-xs font-mono overflow-x-auto whitespace-pre-wrap">{contentText}</pre>
                         </div>
                       );
                     }
-                    
-                    // Handle empty tool results
-                    if (!contentText || contentText.trim() === '') {
-                      renderedSomething = true;
-                      return (
-                        <div key={idx} className="space-y-2">
-                          <div className="flex items-center gap-2">
-                            <CheckCircle2 className="h-4 w-4 text-green-500" />
-                            <span className="text-sm font-medium">Tool Result</span>
-                          </div>
-                          <div className="ml-6 p-3 bg-muted/50 rounded-md border text-sm text-muted-foreground italic">
-                            Tool did not return any output
-                          </div>
-                        </div>
-                      );
-                    }
-                    
+
                     renderedSomething = true;
                     return (
-                      <div key={idx} className="space-y-2">
-                        <div className="flex items-center gap-2">
-                          {content.is_error ? (
-                            <AlertCircle className="h-4 w-4 text-destructive" />
-                          ) : (
-                            <CheckCircle2 className="h-4 w-4 text-green-500" />
-                          )}
-                          <span className="text-sm font-medium">Tool Result</span>
-                        </div>
-                        <div className="ml-6 p-2 bg-background rounded-md border">
-                          <pre className="text-xs font-mono overflow-x-auto whitespace-pre-wrap">
-                            {contentText}
-                          </pre>
-                        </div>
+                      <div key={idx}>
+                        <CollapsibleToolCard
+                          memoryId={content.tool_use_id ? `${content.tool_use_id}:result` : undefined}
+                          label={resultTitle}
+                          preview={truncatePreview(contentText)}
+                          borderClass="border-l-border"
+                          valueClass="text-muted-foreground"
+                          status={content.is_error ? "error" : "success"}
+                          defaultExpanded={false}
+                        >
+                          {resultInner}
+                        </CollapsibleToolCard>
                       </div>
                     );
                   }
@@ -674,13 +794,38 @@ const StreamMessageComponent: React.FC<StreamMessageProps> = ({ message, classNa
                   
                   return null;
                 })}
-              </div>
+        </div>
+      );
+
+      if (!renderedSomething) return null;
+
+      // Tool-result-only user rows: no card/avatar, just the collapsible rows.
+      if (userToolOnly) {
+        return <div className={cn("py-0.5", className)}>{body}</div>;
+      }
+
+      return (
+        <Card
+          className={cn(className)}
+          // Card hardcodes its background via inline style, which beats Tailwind
+          // bg-* classes; override inline so the user message reads as a soft,
+          // distinct blue tint across all themes. A muted steel-blue (lower
+          // saturation/lightness) keeps it distinct without making light text
+          // glare.
+          style={{
+            backgroundColor: "rgba(96, 134, 191, 0.16)",
+            borderColor: "rgba(96, 134, 191, 0.42)",
+            color: "var(--color-card-foreground)",
+          }}
+        >
+          <CardContent className="p-4">
+            <div className="flex items-start gap-3">
+              <User className="h-5 w-5 text-blue-500 mt-0.5" />
+              {body}
             </div>
           </CardContent>
         </Card>
       );
-      if (!renderedSomething) return null;
-      return renderedCard;
     }
 
     // Result message - render with markdown
