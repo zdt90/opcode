@@ -7,18 +7,21 @@ use std::process::Stdio;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter, Manager};
-use tokio::process::{Child, Command};
+use tokio::io::AsyncWriteExt;
+use tokio::process::{Child, ChildStdin, Command};
 use tokio::sync::Mutex;
 
-/// Global state to track current Claude process
+/// Global state to track current Claude process and its stdin for mid-turn injection
 pub struct ClaudeProcessState {
     pub current_process: Arc<Mutex<Option<Child>>>,
+    pub current_stdin: Arc<Mutex<Option<ChildStdin>>>,
 }
 
 impl Default for ClaudeProcessState {
     fn default() -> Self {
         Self {
             current_process: Arc::new(Mutex::new(None)),
+            current_stdin: Arc::new(Mutex::new(None)),
         }
     }
 }
@@ -299,6 +302,7 @@ fn create_system_command(claude_path: &str, args: Vec<String>, project_path: &st
     }
 
     cmd.current_dir(project_path)
+        .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
 
@@ -933,11 +937,10 @@ pub async fn execute_claude_code(
     let claude_path = find_claude_binary(&app)?;
 
     let args = vec![
-        "-p".to_string(),
-        prompt.clone(),
-        "--model".to_string(),
-        model.clone(),
+        "--print".to_string(),
         "--output-format".to_string(),
+        "stream-json".to_string(),
+        "--input-format".to_string(),
         "stream-json".to_string(),
         "--verbose".to_string(),
         "--dangerously-skip-permissions".to_string(),
@@ -965,11 +968,12 @@ pub async fn continue_claude_code(
 
     let args = vec![
         "-c".to_string(), // Continue flag
-        "-p".to_string(),
-        prompt.clone(),
+        "--print".to_string(),
         "--model".to_string(),
         model.clone(),
         "--output-format".to_string(),
+        "stream-json".to_string(),
+        "--input-format".to_string(),
         "stream-json".to_string(),
         "--verbose".to_string(),
         "--dangerously-skip-permissions".to_string(),
@@ -1000,11 +1004,12 @@ pub async fn resume_claude_code(
     let args = vec![
         "--resume".to_string(),
         session_id.clone(),
-        "-p".to_string(),
-        prompt.clone(),
+        "--print".to_string(),
         "--model".to_string(),
         model.clone(),
         "--output-format".to_string(),
+        "stream-json".to_string(),
+        "--input-format".to_string(),
         "stream-json".to_string(),
         "--verbose".to_string(),
         "--dangerously-skip-permissions".to_string(),
@@ -1012,6 +1017,43 @@ pub async fn resume_claude_code(
 
     let cmd = create_system_command(&claude_path, args, &project_path);
     spawn_claude_process(app, cmd, prompt, model, project_path).await
+}
+
+/// Inject a message into the currently running Claude process stdin (mid-turn injection)
+/// This allows steering Claude in real-time while it's working, matching Claude TUI behavior.
+#[tauri::command]
+pub async fn inject_claude_message(
+    app: AppHandle,
+    message: String,
+) -> Result<(), String> {
+    log::info!("Injecting mid-turn message: {}", message);
+
+    let claude_state = app.state::<ClaudeProcessState>();
+    let mut stdin_guard = claude_state.current_stdin.lock().await;
+
+    if let Some(ref mut stdin) = *stdin_guard {
+        // Claude's stream-json input format expects a JSON object per line
+        let json_msg = serde_json::json!({
+            "type": "user",
+            "message": {
+                "role": "user",
+                "content": message
+            }
+        });
+        let line = format!("{}\n", json_msg.to_string());
+        stdin
+            .write_all(line.as_bytes())
+            .await
+            .map_err(|e| format!("Failed to write to Claude stdin: {}", e))?;
+        stdin
+            .flush()
+            .await
+            .map_err(|e| format!("Failed to flush Claude stdin: {}", e))?;
+        log::info!("Mid-turn message injected successfully");
+        Ok(())
+    } else {
+        Err("No active Claude process to inject message into".to_string())
+    }
 }
 
 /// Cancel the currently running Claude Code execution
@@ -1186,9 +1228,10 @@ async fn spawn_claude_process(
         .spawn()
         .map_err(|e| format!("Failed to spawn Claude: {}", e))?;
 
-    // Get stdout and stderr
+    // Get stdout, stderr, and stdin
     let stdout = child.stdout.take().ok_or("Failed to get stdout")?;
     let stderr = child.stderr.take().ok_or("Failed to get stderr")?;
+    let stdin = child.stdin.take().ok_or("Failed to get stdin")?;
 
     // Get the child PID for logging
     let pid = child.id().unwrap_or(0);
@@ -1202,7 +1245,7 @@ async fn spawn_claude_process(
     let session_id_holder: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
     let run_id_holder: Arc<Mutex<Option<i64>>> = Arc::new(Mutex::new(None));
 
-    // Store the child process in the global state (for backward compatibility)
+    // Store the child process and stdin in global state
     let claude_state = app.state::<ClaudeProcessState>();
     {
         let mut current_process = claude_state.current_process.lock().await;
@@ -1212,6 +1255,20 @@ async fn spawn_claude_process(
             let _ = existing_child.kill().await;
         }
         *current_process = Some(child);
+    }
+    {
+        let mut current_stdin = claude_state.current_stdin.lock().await;
+        // Write the initial prompt as the first stream-json message
+        let mut stdin_writer = stdin;
+        let initial_msg = format!("{{\"type\":\"user\",\"message\":{{\"role\":\"user\",\"content\":[{{\"type\":\"text\",\"text\":{}}}]}}}}\n", serde_json::to_string(&prompt).unwrap_or_default());
+        use tokio::io::AsyncWriteExt;
+        if let Err(e) = stdin_writer.write_all(initial_msg.as_bytes()).await {
+            log::error!("Failed to write initial prompt to stdin: {}", e);
+        }
+        if let Err(e) = stdin_writer.flush().await {
+            log::error!("Failed to flush initial prompt to stdin: {}", e);
+        }
+        *current_stdin = Some(stdin_writer);
     }
 
     // Spawn tasks to read stdout and stderr
@@ -1223,6 +1280,7 @@ async fn spawn_claude_process(
     let project_path_clone = project_path.clone();
     let prompt_clone = prompt.clone();
     let model_clone = model.clone();
+    let claude_stdin_close = claude_state.current_stdin.clone();
     let stdout_task = tokio::spawn(async move {
         let mut lines = stdout_reader.lines();
         while let Ok(Some(line)) = lines.next_line().await {
@@ -1270,6 +1328,16 @@ async fn spawn_claude_process(
             }
             // Also emit to the generic event for backward compatibility
             let _ = app_handle.emit("claude-output", &line);
+
+            // When Claude emits a "result" message, the turn is complete.
+            // Close stdin so Claude knows no more input is coming and exits cleanly.
+            if let Ok(msg) = serde_json::from_str::<serde_json::Value>(&line) {
+                if msg["type"] == "result" {
+                    log::info!("Claude turn complete (result message), closing stdin");
+                    let mut stdin_guard = claude_stdin_close.lock().await;
+                    *stdin_guard = None; // dropping ChildStdin closes the pipe
+                }
+            }
         }
     });
 
@@ -1291,6 +1359,7 @@ async fn spawn_claude_process(
     // Wait for the process to complete
     let app_handle_wait = app.clone();
     let claude_state_wait = claude_state.current_process.clone();
+    let claude_stdin_wait = claude_state.current_stdin.clone();
     let session_id_holder_clone3 = session_id_holder.clone();
     let run_id_holder_clone2 = run_id_holder.clone();
     let registry_clone2 = registry.0.clone();
@@ -1332,8 +1401,10 @@ async fn spawn_claude_process(
             let _ = registry_clone2.unregister_process(run_id);
         }
 
-        // Clear the process from state
+        // Clear the process and stdin from state
         *current_process = None;
+        let mut stdin_guard = claude_stdin_wait.lock().await;
+        *stdin_guard = None;
     });
 
     Ok(())

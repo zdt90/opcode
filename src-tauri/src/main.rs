@@ -25,8 +25,8 @@ use commands::claude::{
     get_claude_settings, get_home_directory, get_hooks_config, get_project_sessions,
     get_recently_modified_files, get_session_timeline, get_system_prompt, list_checkpoints,
     list_directory_contents, list_projects, list_running_claude_sessions, load_session_history,
-    open_new_session, read_claude_md_file, restore_checkpoint, resume_claude_code,
-    save_claude_md_file, save_claude_settings, save_system_prompt, search_files,
+    inject_claude_message, open_new_session, read_claude_md_file, restore_checkpoint,
+    resume_claude_code, save_claude_md_file, save_claude_settings, save_system_prompt, search_files,
     track_checkpoint_message, track_session_messages, update_checkpoint_settings,
     update_hooks_config, validate_hook_command, ClaudeProcessState,
 };
@@ -203,6 +203,7 @@ fn main() {
             continue_claude_code,
             resume_claude_code,
             cancel_claude_execution,
+            inject_claude_message,
             list_running_claude_sessions,
             get_claude_session_output,
             list_directory_contents,
