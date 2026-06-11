@@ -361,10 +361,10 @@ function AppContent() {
                     })
                   );
                 }}
-                onNewSession={(projectPath: string) => {
+                onNewSession={(projectPath: string, name?: string) => {
                   window.dispatchEvent(
                     new CustomEvent('new-session-for-project', {
-                      detail: { projectPath },
+                      detail: { projectPath, name },
                     })
                   );
                 }}

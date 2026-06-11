@@ -13,7 +13,7 @@ import type { Project, Session } from '@/lib/api';
 interface SidebarProps {
   onSessionSelect: (session: Session, projectPath: string, displayName: string) => void;
   onSessionOpenInNewTab: (session: Session, projectPath: string, displayName: string) => void;
-  onNewSession: (projectPath: string) => void;
+  onNewSession: (projectPath: string, name?: string) => void;
   activeSessionId?: string;
   isOpen: boolean;
   onToggle: () => void;
@@ -24,6 +24,7 @@ const SIDEBAR_WIDTH_DEFAULT = 260;
 const SIDEBAR_WIDTH_MIN = 180;
 const SIDEBAR_WIDTH_MAX = 480;
 const RUNNING_SESSIONS_POLL_INTERVAL = 5000;
+const SESSIONS_AUTO_REFRESH_INTERVAL = 30000;
 
 export const Sidebar: React.FC<SidebarProps> = ({
   onSessionSelect,
@@ -39,6 +40,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [runningSessionIds, setRunningSessionIds] = useState<Set<string>>(new Set());
   const [reloadSignal, setReloadSignal] = useState(0);
+  const [silentReloadSignal, setSilentReloadSignal] = useState(0);
   const [sidebarWidth, setSidebarWidth] = useState(SIDEBAR_WIDTH_DEFAULT);
   const pollingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const isDraggingRef = useRef(false);
@@ -92,6 +94,25 @@ export const Sidebar: React.FC<SidebarProps> = ({
       }
     };
   }, [isOpen]);
+
+  // Periodically refresh sessions in the background so each session's "last
+  // active" time tracks new activity without a manual refresh. This is silent:
+  // no spinner, and it skips the per-session name lookups.
+  useEffect(() => {
+    if (!isOpen) return;
+    const id = setInterval(() => {
+      setSilentReloadSignal((n) => n + 1);
+    }, SESSIONS_AUTO_REFRESH_INTERVAL);
+    return () => clearInterval(id);
+  }, [isOpen]);
+
+  // Allow other parts of the app (e.g. a freshly named new session) to ask the
+  // sidebar to reload sessions (including custom names).
+  useEffect(() => {
+    const handler = () => setReloadSignal((n) => n + 1);
+    window.addEventListener('opcode-refresh-sessions', handler);
+    return () => window.removeEventListener('opcode-refresh-sessions', handler);
+  }, []);
 
   // Sidebar-wide context menu: always show our custom menu anywhere in the sidebar
   const handleSidebarContextMenu = useCallback(async (e: React.MouseEvent) => {
@@ -211,6 +232,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   onSessionSelectNewTab={onSessionOpenInNewTab}
                   onNewSession={onNewSession}
                   reloadSignal={reloadSignal}
+                  silentReloadSignal={silentReloadSignal}
                 />
               ))}
             </div>
