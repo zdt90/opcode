@@ -360,7 +360,7 @@ const StreamMessageComponent: React.FC<StreamMessageProps> = ({ message, classNa
                     
                     // Otherwise render as plain text
                     return (
-                      <div className="text-sm">
+                      <div className="text-sm whitespace-pre-wrap">
                         {contentStr}
                       </div>
                     );
@@ -612,13 +612,13 @@ const StreamMessageComponent: React.FC<StreamMessageProps> = ({ message, classNa
                   // Text content
                   if (content.type === "text") {
                     // Handle both string and object formats
-                    const textContent = typeof content.text === 'string' 
-                      ? content.text 
+                    const textContent = typeof content.text === 'string'
+                      ? content.text
                       : (content.text?.text || JSON.stringify(content.text));
-                    
+
                     renderedSomething = true;
                     return (
-                      <div key={idx} className="text-sm">
+                      <div key={idx} className="text-sm whitespace-pre-wrap">
                         {textContent}
                       </div>
                     );

@@ -167,7 +167,8 @@ export class SessionPersistenceService {
       id: data.sessionId,
       project_id: data.projectId,
       project_path: data.projectPath,
-      created_at: data.timestamp / 1000, // Convert to seconds
+      created_at: data.timestamp / 1000,
+      last_updated_at: data.timestamp / 1000,
       first_message: "Restored session"
     };
   }

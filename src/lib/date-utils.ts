@@ -114,6 +114,24 @@ function getDayName(date: Date): string {
  * formatTimeAgo(Date.now() - 3600000) // "1 hour ago"
  * formatTimeAgo(Date.now() - 86400000) // "1 day ago"
  */
+/**
+ * Compact relative time: <1m, 3m, 13hr, 2d, 3w, 2mo, 1y
+ */
+export function formatTimeAgoBrief(timestamp: number): string {
+  const diff = Date.now() - timestamp;
+  const minutes = Math.floor(diff / 60000);
+  const hours = Math.floor(minutes / 60);
+  const days = Math.floor(hours / 24);
+
+  if (minutes < 1) return '<1m';
+  if (hours < 1) return `${minutes}m`;
+  if (days < 1) return `${hours}hr`;
+  if (days < 7) return `${days}d`;
+  if (days < 30) return `${Math.floor(days / 7)}w`;
+  if (days < 365) return `${Math.floor(days / 30)}mo`;
+  return `${Math.floor(days / 365)}y`;
+}
+
 export function formatTimeAgo(timestamp: number): string {
   const now = Date.now();
   const diff = now - timestamp;

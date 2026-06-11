@@ -61,6 +61,7 @@ export const RunningClaudeSessions: React.FC<RunningClaudeSessionsProps> = ({
         project_id: processInfo.project_path.replace(/[^a-zA-Z0-9]/g, '-'),
         project_path: processInfo.project_path,
         created_at: new Date(processInfo.started_at).getTime() / 1000,
+        last_updated_at: new Date(processInfo.started_at).getTime() / 1000,
       };
       
       // Emit event to navigate to the session

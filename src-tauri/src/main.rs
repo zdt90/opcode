@@ -20,13 +20,14 @@ use commands::agents::{
 use commands::claude::{
     cancel_claude_execution, check_auto_checkpoint, check_claude_version, cleanup_old_checkpoints,
     clear_checkpoint_manager, continue_claude_code, create_checkpoint, create_project,
-    execute_claude_code, find_claude_md_files, fork_from_checkpoint, get_checkpoint_diff,
-    get_checkpoint_settings, get_checkpoint_state_stats, get_claude_session_output,
-    get_claude_settings, get_home_directory, get_hooks_config, get_project_sessions,
-    get_recently_modified_files, get_session_timeline, get_system_prompt, list_checkpoints,
-    list_directory_contents, list_projects, list_running_claude_sessions, load_session_history,
-    inject_claude_message, open_new_session, read_claude_md_file, restore_checkpoint,
-    resume_claude_code, save_claude_md_file, save_claude_settings, save_system_prompt, search_files,
+    delete_session, execute_claude_code, find_claude_md_files, fork_from_checkpoint, open_devtools,
+    get_checkpoint_diff, get_checkpoint_settings, get_checkpoint_state_stats,
+    get_claude_session_output, get_claude_settings, get_home_directory, get_hooks_config,
+    get_project_sessions, get_recently_modified_files, get_session_name, get_session_timeline,
+    get_setting, get_system_prompt, list_checkpoints, list_directory_contents, list_projects,
+    list_running_claude_sessions, load_session_history, inject_claude_message, open_new_session,
+    read_claude_md_file, rename_session, restore_checkpoint, resume_claude_code,
+    save_claude_md_file, save_claude_settings, save_system_prompt, search_files,
     track_checkpoint_message, track_session_messages, update_checkpoint_settings,
     update_hooks_config, validate_hook_command, ClaudeProcessState,
 };
@@ -212,6 +213,11 @@ fn main() {
             get_hooks_config,
             update_hooks_config,
             validate_hook_command,
+            // Session metadata
+            delete_session,
+            rename_session,
+            get_session_name,
+            get_setting,
             // Checkpoint Management
             create_checkpoint,
             restore_checkpoint,
