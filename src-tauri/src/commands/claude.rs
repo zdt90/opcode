@@ -2384,16 +2384,6 @@ pub async fn get_session_name(session_id: String) -> Result<Option<String>, Stri
         .map(|s| s.to_string()))
 }
 
-/// Returns a setting value from localStorage-backed app settings (thin wrapper)
-/// Used by the StartupIntro component via the api module.
-#[tauri::command]
-pub async fn get_setting(key: String) -> Result<Option<String>, String> {
-    // Settings for desktop are stored in localStorage via the web layer;
-    // for now return None so callers fall back to defaults.
-    log::debug!("get_setting called for key: {}", key);
-    Ok(None)
-}
-
 #[tauri::command]
 pub async fn open_devtools(window: tauri::WebviewWindow) -> Result<(), String> {
     #[cfg(debug_assertions)]
