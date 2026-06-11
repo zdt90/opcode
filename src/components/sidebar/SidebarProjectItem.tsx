@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react';
-import { ChevronRight, ChevronDown, FolderOpen, Loader2, Plus, Archive } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { ChevronRight, ChevronDown, FolderOpen, Loader2, Plus, Archive, Check, X } from 'lucide-react';
+import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 import { apiCall } from '@/lib/apiAdapter';
 import { SidebarSessionItem } from './SidebarSessionItem';
@@ -16,9 +17,11 @@ interface SidebarProjectItemProps {
   runningSessionIds?: Set<string>;
   onSessionSelect: (session: Session, projectPath: string, displayName: string) => void;
   onSessionSelectNewTab: (session: Session, projectPath: string, displayName: string) => void;
-  onNewSession: (projectPath: string) => void;
+  onNewSession: (projectPath: string, name?: string) => void;
   /** Incrementing this triggers a force-reload of sessions without unmounting */
   reloadSignal?: number;
+  /** Incrementing this triggers a silent (no-spinner) refresh of sessions */
+  silentReloadSignal?: number;
 }
 
 function getProjectBaseName(path: string): string {
@@ -34,6 +37,7 @@ export const SidebarProjectItem: React.FC<SidebarProjectItemProps> = ({
   onSessionSelectNewTab,
   onNewSession,
   reloadSignal,
+  silentReloadSignal,
 }) => {
   const [isExpanded, setIsExpanded] = useState(false);
   const [sessions, setSessions] = useState<Session[]>([]);
@@ -42,8 +46,40 @@ export const SidebarProjectItem: React.FC<SidebarProjectItemProps> = ({
   const [sessionNames, setSessionNames] = useState<Record<string, string>>({});
   const [archivedIds, setArchivedIds] = useState<Set<string>>(new Set());
   const [showArchived, setShowArchived] = useState(false);
+  const [isCreatingSession, setIsCreatingSession] = useState(false);
+  const [newSessionName, setNewSessionName] = useState('');
+  const newSessionInputRef = useRef<HTMLInputElement>(null);
 
   const projectName = getProjectBaseName(project.path);
+
+  useEffect(() => {
+    if (isCreatingSession && newSessionInputRef.current) {
+      newSessionInputRef.current.focus();
+    }
+  }, [isCreatingSession]);
+
+  const handleCreateSessionStart = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setNewSessionName('');
+    setIsCreatingSession(true);
+  };
+
+  const handleCreateSessionCommit = () => {
+    const name = newSessionName.trim();
+    setIsCreatingSession(false);
+    setNewSessionName('');
+    onNewSession(project.path, name || undefined);
+  };
+
+  const handleCreateSessionCancel = () => {
+    setIsCreatingSession(false);
+    setNewSessionName('');
+  };
+
+  const handleCreateSessionKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') { e.preventDefault(); handleCreateSessionCommit(); }
+    else if (e.key === 'Escape') { e.preventDefault(); handleCreateSessionCancel(); }
+  };
 
   useEffect(() => {
     if (reloadSignal && reloadSignal > 0 && isExpanded) {
@@ -52,9 +88,16 @@ export const SidebarProjectItem: React.FC<SidebarProjectItemProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reloadSignal]);
 
-  const loadSessions = async (force = false) => {
+  useEffect(() => {
+    if (silentReloadSignal && silentReloadSignal > 0 && isExpanded) {
+      loadSessions(true, true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [silentReloadSignal]);
+
+  const loadSessions = async (force = false, silent = false) => {
     if (loaded && !force) return;
-    setLoading(true);
+    if (!silent) setLoading(true);
     try {
       const [result, archived] = await Promise.all([
         apiCall<Session[]>('get_project_sessions', { projectId: project.id }),
@@ -64,22 +107,26 @@ export const SidebarProjectItem: React.FC<SidebarProjectItemProps> = ({
       setArchivedIds(new Set(archived));
       setLoaded(true);
 
-      const namesMap: Record<string, string> = {};
-      await Promise.all(
-        result.map(async (s) => {
-          try {
-            const name = await apiCall<string | null>('get_session_name', { sessionId: s.id });
-            if (name) namesMap[s.id] = name;
-          } catch (_) {
-            // no custom name
-          }
-        })
-      );
-      setSessionNames(namesMap);
+      // Custom names rarely change; skip the extra round-trips on silent
+      // auto-refreshes and only refetch them on explicit (re)loads.
+      if (!silent) {
+        const namesMap: Record<string, string> = {};
+        await Promise.all(
+          result.map(async (s) => {
+            try {
+              const name = await apiCall<string | null>('get_session_name', { sessionId: s.id });
+              if (name) namesMap[s.id] = name;
+            } catch (_) {
+              // no custom name
+            }
+          })
+        );
+        setSessionNames(namesMap);
+      }
     } catch (err) {
       console.error('[Sidebar] Failed to load sessions for project:', project.id, err);
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 
@@ -177,15 +224,44 @@ export const SidebarProjectItem: React.FC<SidebarProjectItemProps> = ({
       {/* Sessions list */}
       {isExpanded && (
         <div className="pl-5 mt-0.5 space-y-0.5">
-          {/* New Session button */}
+          {/* New Session button / inline name input */}
           {!showArchived && (
-            <button
-              onClick={(e) => { e.stopPropagation(); onNewSession(project.path); }}
-              className="w-full flex items-center gap-1.5 px-2 py-1.5 rounded-md text-xs text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors"
-            >
-              <Plus size={11} />
-              New Session
-            </button>
+            isCreatingSession ? (
+              <div className="flex items-center gap-1 px-2 py-1" onClick={(e) => e.stopPropagation()}>
+                <Plus size={11} className="shrink-0 text-muted-foreground" />
+                <Input
+                  ref={newSessionInputRef}
+                  value={newSessionName}
+                  onChange={(e) => setNewSessionName(e.target.value)}
+                  onKeyDown={handleCreateSessionKeyDown}
+                  onBlur={handleCreateSessionCommit}
+                  placeholder="Session name (optional)"
+                  className="h-5 px-1 py-0 text-xs flex-1 min-w-0"
+                />
+                <button
+                  onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); handleCreateSessionCommit(); }}
+                  className="text-green-500 hover:text-green-400 shrink-0"
+                  title="Create session"
+                >
+                  <Check size={12} />
+                </button>
+                <button
+                  onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); handleCreateSessionCancel(); }}
+                  className="text-muted-foreground hover:text-foreground shrink-0"
+                  title="Cancel"
+                >
+                  <X size={12} />
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={handleCreateSessionStart}
+                className="w-full flex items-center gap-1.5 px-2 py-1.5 rounded-md text-xs text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors"
+              >
+                <Plus size={11} />
+                New Session
+              </button>
+            )
           )}
           {visibleSessions.length === 0 && !loading && (
             <p className="text-[10px] text-muted-foreground px-2 py-1">

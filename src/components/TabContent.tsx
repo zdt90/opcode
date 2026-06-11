@@ -5,6 +5,7 @@ import { useScreenTracking } from '@/hooks/useAnalytics';
 import { Tab } from '@/contexts/TabContext';
 import { Loader2, Plus, ArrowLeft } from 'lucide-react';
 import { api, type Project, type Session, type ClaudeMdFile } from '@/lib/api';
+import { apiCall } from '@/lib/apiAdapter';
 import { ProjectList } from '@/components/ProjectList';
 import { SessionList } from '@/components/SessionList';
 import { Button } from '@/components/ui/button';
@@ -30,6 +31,13 @@ interface TabPanelProps {
 
 const TabPanel: React.FC<TabPanelProps> = ({ tab, isActive }) => {
   const { updateTab } = useTabState();
+  // Guards binding a pending session name to its session id exactly once.
+  const nameBoundRef = React.useRef(false);
+  // Tracks streaming edge + whether this tab started as a brand-new session, so
+  // we reveal it in the sidebar once its first turn completes.
+  const prevStreamingRef = React.useRef(false);
+  const sessionRevealedRef = React.useRef(false);
+  const isNewSessionRef = React.useRef(!tab.sessionId);
   const [projects, setProjects] = React.useState<Project[]>([]);
   const [selectedProject, setSelectedProject] = React.useState<Project | null>(null);
   const [sessions, setSessions] = React.useState<Session[]>([]);
@@ -45,6 +53,41 @@ const TabPanel: React.FC<TabPanelProps> = ({ tab, isActive }) => {
       loadProjects();
     }
   }, [isActive, tab.type]);
+
+  // Keep chat tab titles normalized to "{Project Name} - {Session Display Name}"
+  // (or just the project name when there's no session name yet). This also fixes
+  // titles restored from persistence on startup, which may be a bare project name.
+  useEffect(() => {
+    if (tab.type !== 'chat') return;
+    // A freshly named session keeps its pending title until it's bound.
+    if (tab.pendingName) return;
+    const sessionId = tab.sessionId || tab.sessionData?.id;
+    const projectPath = tab.initialProjectPath || tab.sessionData?.project_path || '';
+    if (!sessionId || !projectPath) return;
+    const projectName = projectPath.split('/').pop() || projectPath.split('\\').pop() || 'Session';
+    // Already in the desired "{Project} - {Session}" shape; leave it alone.
+    if (tab.title.startsWith(`${projectName} - `)) return;
+
+    let cancelled = false;
+    (async () => {
+      let sessionName = '';
+      try {
+        const custom = await apiCall<string | null>('get_session_name', { sessionId });
+        if (custom) sessionName = custom;
+      } catch {
+        // no custom name
+      }
+      if (!sessionName && tab.sessionData?.first_message) {
+        sessionName = tab.sessionData.first_message.trim().slice(0, 40);
+      }
+      if (!sessionName) sessionName = sessionId.slice(0, 8);
+      const desired = sessionName ? `${projectName} - ${sessionName}` : projectName;
+      if (!cancelled && tab.title !== desired) {
+        updateTab(tab.id, { title: desired });
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [tab.id, tab.type, tab.sessionId, tab.sessionData, tab.pendingName, tab.initialProjectPath, tab.title]);
   
   const loadProjects = async () => {
     try {
@@ -260,11 +303,35 @@ const TabPanel: React.FC<TabPanelProps> = ({ tab, isActive }) => {
                 });
               }}
               onProjectPathChange={(path: string) => {
-                // Update tab title with directory name
+                // The title is already meaningful for existing sessions ("Project -
+                // Session") and for freshly named sessions; don't overwrite it with
+                // the bare project directory name.
+                if (tab.pendingName || tab.sessionId) return;
                 const dirName = path.split('/').pop() || path.split('\\').pop() || 'Session';
                 updateTab(tab.id, {
                   title: dirName
                 });
+              }}
+              onStreamingChange={(isStreaming: boolean, sessionId: string | null) => {
+                // Bind the pending user-chosen name as soon as the new session
+                // gets its id.
+                if (sessionId && tab.pendingName && !tab.sessionId && !nameBoundRef.current) {
+                  nameBoundRef.current = true;
+                  const name = tab.pendingName;
+                  apiCall('rename_session', { sessionId, name }).catch((err) => {
+                    console.error('[TabContent] Failed to bind session name:', err);
+                  });
+                  updateTab(tab.id, { sessionId, pendingName: undefined });
+                }
+                // When a brand-new session finishes its first turn, persist its id
+                // and reveal it in the sidebar (its session file is on disk by now).
+                const justFinished = prevStreamingRef.current && !isStreaming;
+                prevStreamingRef.current = isStreaming;
+                if (justFinished && sessionId && isNewSessionRef.current && !sessionRevealedRef.current) {
+                  sessionRevealedRef.current = true;
+                  if (!tab.sessionId) updateTab(tab.id, { sessionId });
+                  window.dispatchEvent(new CustomEvent('opcode-refresh-sessions'));
+                }
               }}
             />
           </div>
@@ -488,10 +555,15 @@ export const TabContent: React.FC = () => {
     };
 
     const handleNewSessionForProject = (event: CustomEvent) => {
-      const { projectPath } = event.detail;
+      const { projectPath, name } = event.detail as { projectPath: string; name?: string };
+      const trimmedName = (name || '').trim();
       const projectName = projectPath.split('/').pop() || 'New Session';
-      const newTabId = createChatTab(undefined, projectName, projectPath);
-      updateTab(newTabId, { initialProjectPath: projectPath });
+      const title = trimmedName ? `${projectName} - ${trimmedName}` : projectName;
+      const newTabId = createChatTab(undefined, title, projectPath);
+      updateTab(newTabId, {
+        initialProjectPath: projectPath,
+        pendingName: trimmedName || undefined,
+      });
     };
 
     window.addEventListener('open-session-in-tab', handleOpenSessionInTab as EventListener);

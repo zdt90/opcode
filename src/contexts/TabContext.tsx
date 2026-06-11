@@ -8,6 +8,7 @@ export interface Tab {
   title: string;
   sessionId?: string;  // for chat tabs
   sessionData?: any; // for chat tabs - stores full session object
+  pendingName?: string; // for chat tabs - user-chosen name to bind once a session id is assigned
   agentRunId?: string; // for agent tabs
   agentData?: any; // for agent-execution tabs
   claudeFileId?: string; // for claude-file tabs
