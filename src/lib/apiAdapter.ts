@@ -251,6 +251,12 @@ function mapCommandToEndpoint(command: string, _params?: any): string {
     'get_hooks_config': '/api/hooks/config',
     'update_hooks_config': '/api/hooks/config',
     'validate_hook_command': '/api/hooks/validate',
+
+    // Session metadata (opcode-specific)
+    'delete_session': '/api/sessions/{sessionId}/delete',
+    'rename_session': '/api/sessions/{sessionId}/rename',
+    'get_session_name': '/api/sessions/{sessionId}/name',
+    'get_setting': '/api/settings/app/{key}',
     
     // Slash commands
     'slash_commands_list': '/api/slash-commands',

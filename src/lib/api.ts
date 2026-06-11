@@ -47,6 +47,8 @@ export interface Session {
   todo_data?: any;
   /** Unix timestamp when the session file was created */
   created_at: number;
+  /** Unix timestamp of the last modification to the session file (best proxy for last activity) */
+  last_updated_at: number;
   /** First user message content (if available) */
   first_message?: string;
   /** Timestamp of the first user message (if available) */

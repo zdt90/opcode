@@ -121,9 +121,15 @@ export function makeLinksClickable(
       <a
         key={`link-${index}`}
         href={link.fullUrl}
-        onClick={(e) => {
+        onClick={async (e) => {
           e.preventDefault();
-          onLinkClick(link.fullUrl);
+          try {
+            const { open } = await import('@tauri-apps/plugin-shell');
+            await open(link.fullUrl);
+          } catch {
+            // Fallback for web/non-Tauri env
+            onLinkClick(link.fullUrl);
+          }
         }}
         className="text-primary underline hover:text-primary/80 cursor-pointer"
         title={link.fullUrl}

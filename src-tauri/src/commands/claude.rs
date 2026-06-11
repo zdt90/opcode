@@ -54,6 +54,8 @@ pub struct Session {
     pub todo_data: Option<serde_json::Value>,
     /// Unix timestamp when the session file was created
     pub created_at: u64,
+    /// Unix timestamp of the last modification to the session file (best proxy for last activity)
+    pub last_updated_at: u64,
     /// First user message content (if available)
     pub first_message: Option<String>,
     /// Timestamp of the first user message (if available)
@@ -522,6 +524,13 @@ pub async fn get_project_sessions(project_id: String) -> Result<Vec<Session>, St
                     .unwrap_or_default()
                     .as_secs();
 
+                let last_updated_at = metadata
+                    .modified()
+                    .unwrap_or(SystemTime::UNIX_EPOCH)
+                    .duration_since(SystemTime::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs();
+
                 // Extract first user message and timestamp
                 let (first_message, message_timestamp) = extract_first_user_message(&path);
 
@@ -541,6 +550,7 @@ pub async fn get_project_sessions(project_id: String) -> Result<Vec<Session>, St
                     project_path: project_path.clone(),
                     todo_data,
                     created_at,
+                    last_updated_at,
                     first_message,
                     message_timestamp,
                 });
@@ -548,8 +558,8 @@ pub async fn get_project_sessions(project_id: String) -> Result<Vec<Session>, St
         }
     }
 
-    // Sort sessions by creation time (newest first)
-    sessions.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    // Sort sessions by last activity time (newest first)
+    sessions.sort_by(|a, b| b.last_updated_at.cmp(&a.last_updated_at));
 
     log::info!(
         "Found {} sessions for project {}",
@@ -2257,6 +2267,136 @@ pub async fn validate_hook_command(command: String) -> Result<serde_json::Value,
         }
         Err(e) => Err(format!("Failed to validate command: {}", e)),
     }
+}
+
+/// Path to the opcode metadata file
+fn get_opcode_metadata_path() -> Result<PathBuf> {
+    let base = dirs::home_dir()
+        .context("Could not find home directory")?;
+    Ok(base.join(".claude").join("opcode-metadata.json"))
+}
+
+/// Reads the opcode metadata map from `~/.claude/opcode-metadata.json`
+fn read_opcode_metadata() -> serde_json::Map<String, serde_json::Value> {
+    let path = match get_opcode_metadata_path() {
+        Ok(p) => p,
+        Err(_) => return serde_json::Map::new(),
+    };
+    if !path.exists() {
+        return serde_json::Map::new();
+    }
+    fs::read_to_string(&path)
+        .ok()
+        .and_then(|content| serde_json::from_str::<serde_json::Value>(&content).ok())
+        .and_then(|v| v.as_object().cloned())
+        .unwrap_or_default()
+}
+
+/// Writes the opcode metadata map back to disk
+fn write_opcode_metadata(map: &serde_json::Map<String, serde_json::Value>) -> Result<(), String> {
+    let path = get_opcode_metadata_path().map_err(|e| e.to_string())?;
+    // Ensure parent directory exists
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|e| format!("Failed to create .claude directory: {}", e))?;
+    }
+    let json = serde_json::to_string_pretty(&serde_json::Value::Object(map.clone()))
+        .map_err(|e| format!("Failed to serialize metadata: {}", e))?;
+    fs::write(&path, json).map_err(|e| format!("Failed to write opcode-metadata.json: {}", e))
+}
+
+/// Deletes a session: removes the `.jsonl` file and any same-name subdirectory
+/// under `~/.claude/projects/<project_id>/`.
+///
+/// Because we don't store per-session `project_id` here we scan all project
+/// directories for the matching JSONL file.
+#[tauri::command]
+pub async fn delete_session(session_id: String) -> Result<(), String> {
+    log::info!("Deleting session: {}", session_id);
+
+    let claude_dir = get_claude_dir().map_err(|e| e.to_string())?;
+    let projects_dir = claude_dir.join("projects");
+
+    if !projects_dir.exists() {
+        return Err("Projects directory does not exist".to_string());
+    }
+
+    let mut deleted = false;
+
+    let entries = fs::read_dir(&projects_dir)
+        .map_err(|e| format!("Failed to read projects directory: {}", e))?;
+
+    for entry in entries.flatten() {
+        let project_dir = entry.path();
+        if !project_dir.is_dir() {
+            continue;
+        }
+
+        let jsonl_path = project_dir.join(format!("{}.jsonl", session_id));
+        if jsonl_path.exists() {
+            fs::remove_file(&jsonl_path)
+                .map_err(|e| format!("Failed to delete session file: {}", e))?;
+            deleted = true;
+            log::info!("Deleted session file: {:?}", jsonl_path);
+        }
+
+        // Also remove a matching subdirectory if it exists (some Claude versions create one)
+        let session_subdir = project_dir.join(&session_id);
+        if session_subdir.exists() && session_subdir.is_dir() {
+            fs::remove_dir_all(&session_subdir)
+                .map_err(|e| format!("Failed to delete session directory: {}", e))?;
+            log::info!("Deleted session directory: {:?}", session_subdir);
+        }
+    }
+
+    if !deleted {
+        return Err(format!("Session not found: {}", session_id));
+    }
+
+    // Also remove from metadata
+    let mut meta = read_opcode_metadata();
+    if meta.remove(&session_id).is_some() {
+        let _ = write_opcode_metadata(&meta);
+    }
+
+    Ok(())
+}
+
+/// Saves a custom display name for a session in `~/.claude/opcode-metadata.json`
+#[tauri::command]
+pub async fn rename_session(session_id: String, name: String) -> Result<(), String> {
+    log::info!("Renaming session {} to {}", session_id, name);
+
+    let mut meta = read_opcode_metadata();
+    meta.insert(session_id, serde_json::Value::String(name));
+    write_opcode_metadata(&meta)
+}
+
+/// Returns the custom display name for a session, or null if none is set
+#[tauri::command]
+pub async fn get_session_name(session_id: String) -> Result<Option<String>, String> {
+    let meta = read_opcode_metadata();
+    Ok(meta
+        .get(&session_id)
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string()))
+}
+
+/// Returns a setting value from localStorage-backed app settings (thin wrapper)
+/// Used by the StartupIntro component via the api module.
+#[tauri::command]
+pub async fn get_setting(key: String) -> Result<Option<String>, String> {
+    // Settings for desktop are stored in localStorage via the web layer;
+    // for now return None so callers fall back to defaults.
+    log::debug!("get_setting called for key: {}", key);
+    Ok(None)
+}
+
+#[tauri::command]
+pub async fn open_devtools(window: tauri::WebviewWindow) -> Result<(), String> {
+    #[cfg(debug_assertions)]
+    window.open_devtools();
+    Ok(())
 }
 
 #[cfg(test)]

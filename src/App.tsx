@@ -26,6 +26,7 @@ import { TabContent } from "@/components/TabContent";
 import { useTabState } from "@/hooks/useTabState";
 import { useAppLifecycle, useTrackEvent } from "@/hooks";
 import { StartupIntro } from "@/components/StartupIntro";
+import { Sidebar, SidebarToggleButton } from "@/components/sidebar/Sidebar";
 
 type View = 
   | "welcome" 
@@ -62,6 +63,7 @@ function AppContent() {
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" | "info" } | null>(null);
   const [projectForSettings, setProjectForSettings] = useState<Project | null>(null);
   const [previousView] = useState<View>("welcome");
+  const [showSidebar, setShowSidebar] = useState(true);
   
   // Initialize analytics lifecycle tracking
   useAppLifecycle();
@@ -340,8 +342,42 @@ function AppContent() {
         return (
           <div className="h-full flex flex-col">
             <TabManager className="flex-shrink-0" />
-            <div className="flex-1 overflow-hidden">
-              <TabContent />
+            <div className="flex-1 overflow-hidden flex flex-row">
+              {/* Session Sidebar */}
+              <Sidebar
+                isOpen={showSidebar}
+                onToggle={() => setShowSidebar(false)}
+                onSessionSelect={(session: Session, projectPath: string, displayName: string) => {
+                  window.dispatchEvent(
+                    new CustomEvent('claude-session-selected', {
+                      detail: { session, projectPath, displayName },
+                    })
+                  );
+                }}
+                onSessionOpenInNewTab={(session: Session, projectPath: string, displayName: string) => {
+                  window.dispatchEvent(
+                    new CustomEvent('claude-session-selected', {
+                      detail: { session, projectPath, displayName, openInNewTab: true },
+                    })
+                  );
+                }}
+                onNewSession={(projectPath: string) => {
+                  window.dispatchEvent(
+                    new CustomEvent('new-session-for-project', {
+                      detail: { projectPath },
+                    })
+                  );
+                }}
+              />
+              {/* Collapse toggle strip (visible when sidebar is closed) */}
+              <SidebarToggleButton
+                isOpen={showSidebar}
+                onClick={() => setShowSidebar(true)}
+              />
+              {/* Main tab content area */}
+              <div className="flex-1 overflow-hidden">
+                <TabContent />
+              </div>
             </div>
           </div>
         );
