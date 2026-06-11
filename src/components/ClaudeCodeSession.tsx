@@ -1276,6 +1276,7 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
                   message={message} 
                   streamMessages={messages}
                   onLinkDetected={handleLinkDetected}
+                  isStreaming={isLoading}
                 />
               </motion.div>
             </div>
