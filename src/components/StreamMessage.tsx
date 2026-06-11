@@ -4,7 +4,9 @@ import {
   User, 
   Bot, 
   AlertCircle, 
-  CheckCircle2
+  CheckCircle2,
+  Copy,
+  Check
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
@@ -41,14 +43,61 @@ import {
   WebFetchWidget
 } from "./ToolWidgets";
 
+/**
+ * A fenced code block rendered with syntax highlighting and a copy-to-clipboard
+ * button shown on hover. Only used for block-level code, not inline code.
+ */
+const CodeBlock: React.FC<{
+  language: string;
+  value: string;
+  syntaxTheme: any;
+}> = ({ language, value, syntaxTheme }) => {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      console.error("Failed to copy code block:", err);
+    }
+  };
+
+  return (
+    <div className="group relative">
+      <button
+        type="button"
+        onClick={handleCopy}
+        aria-label={copied ? "Copied" : "Copy code"}
+        title={copied ? "Copied" : "Copy code"}
+        className="absolute right-2 top-2 z-10 flex items-center justify-center rounded-md border border-border/50 bg-background/80 p-1.5 text-muted-foreground opacity-0 backdrop-blur transition-opacity hover:bg-muted hover:text-foreground focus:opacity-100 focus:outline-none group-hover:opacity-100"
+      >
+        {copied ? (
+          <Check className="h-3.5 w-3.5 text-green-500" />
+        ) : (
+          <Copy className="h-3.5 w-3.5" />
+        )}
+      </button>
+      <SyntaxHighlighter style={syntaxTheme} language={language} PreTag="div">
+        {value}
+      </SyntaxHighlighter>
+    </div>
+  );
+};
+
 function markdownComponents(syntaxTheme: any) {
   return {
     code({ node, inline, className, children, ...props }: any) {
       const match = /language-(\w+)/.exec(className || '');
+      // Block-level code (fenced, with a language) gets syntax highlighting and
+      // a copy button. Inline code is left untouched.
       return !inline && match ? (
-        <SyntaxHighlighter style={syntaxTheme} language={match[1]} PreTag="div" {...props}>
-          {String(children).replace(/\n$/, '')}
-        </SyntaxHighlighter>
+        <CodeBlock
+          language={match[1]}
+          value={String(children).replace(/\n$/, '')}
+          syntaxTheme={syntaxTheme}
+        />
       ) : (
         <code className={className} {...props}>
           {children}
