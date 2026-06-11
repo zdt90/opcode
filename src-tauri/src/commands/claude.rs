@@ -1044,12 +1044,17 @@ pub async fn inject_claude_message(
     let mut stdin_guard = claude_state.current_stdin.lock().await;
 
     if let Some(ref mut stdin) = *stdin_guard {
-        // Claude's stream-json input format expects a JSON object per line
+        // Claude's stream-json input format expects a JSON object per line.
+        // Use the same content shape as the initial prompt (an array of typed
+        // content blocks) so both code paths produce identical message structure.
         let json_msg = serde_json::json!({
             "type": "user",
             "message": {
                 "role": "user",
-                "content": message
+                "content": [{
+                    "type": "text",
+                    "text": message
+                }]
             }
         });
         let line = format!("{}\n", json_msg.to_string());
