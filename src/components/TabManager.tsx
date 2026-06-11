@@ -78,7 +78,7 @@ const TabItem: React.FC<TabItemProps> = ({ tab, isActive, onClose, onClick, isDr
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
       onClick={() => onClick(tab.id)}
-      onMouseDown={(e) => {
+      onMouseDown={(e: React.MouseEvent) => {
         // Middle-click closes the tab. Reorder.Item (framer-motion) swallows
         // onAuxClick, so handle it on mousedown directly.
         if (e.button === 1) {

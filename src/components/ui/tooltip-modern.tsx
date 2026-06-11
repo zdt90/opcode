@@ -38,6 +38,7 @@ interface TooltipSimpleProps {
   children: React.ReactNode
   side?: "top" | "right" | "bottom" | "left"
   align?: "start" | "center" | "end"
+  alignOffset?: number
   delayDuration?: number
   className?: string
   contentClassName?: string
@@ -51,6 +52,7 @@ export const TooltipSimple: React.FC<TooltipSimpleProps> = ({
   children,
   side = "top",
   align = "center",
+  alignOffset,
   delayDuration = 200,
   className,
   contentClassName,
@@ -60,7 +62,7 @@ export const TooltipSimple: React.FC<TooltipSimpleProps> = ({
       <TooltipTrigger asChild className={className}>
         {children}
       </TooltipTrigger>
-      <TooltipContent side={side} align={align} className={contentClassName}>
+      <TooltipContent side={side} align={align} alignOffset={alignOffset} className={contentClassName}>
         {content}
       </TooltipContent>
     </Tooltip>

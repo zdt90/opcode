@@ -6,6 +6,7 @@ import { initializeWebMode } from "@/lib/apiAdapter";
 import { OutputCacheProvider } from "@/lib/outputCache";
 import { TabProvider } from "@/contexts/TabContext";
 import { ThemeProvider } from "@/contexts/ThemeContext";
+import { UIScaleProvider } from "@/contexts/UIScaleContext";
 import { Card } from "@/components/ui/card";
 import { ProjectList } from "@/components/ProjectList";
 import { FilePicker } from "@/components/FilePicker";
@@ -564,12 +565,14 @@ function App() {
 
   return (
     <ThemeProvider>
-      <OutputCacheProvider>
-        <TabProvider>
-          <AppContent />
-          <StartupIntro visible={showIntro} />
-        </TabProvider>
-      </OutputCacheProvider>
+      <UIScaleProvider>
+        <OutputCacheProvider>
+          <TabProvider>
+            <AppContent />
+            <StartupIntro visible={showIntro} />
+          </TabProvider>
+        </OutputCacheProvider>
+      </UIScaleProvider>
     </ThemeProvider>
   );
 }
