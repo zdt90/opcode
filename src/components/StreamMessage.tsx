@@ -41,6 +41,23 @@ import {
   WebFetchWidget
 } from "./ToolWidgets";
 
+function markdownComponents(syntaxTheme: any) {
+  return {
+    code({ node, inline, className, children, ...props }: any) {
+      const match = /language-(\w+)/.exec(className || '');
+      return !inline && match ? (
+        <SyntaxHighlighter style={syntaxTheme} language={match[1]} PreTag="div" {...props}>
+          {String(children).replace(/\n$/, '')}
+        </SyntaxHighlighter>
+      ) : (
+        <code className={className} {...props}>
+          {children}
+        </code>
+      );
+    },
+  };
+}
+
 interface StreamMessageProps {
   message: ClaudeStreamMessage;
   className?: string;
@@ -131,25 +148,7 @@ const StreamMessageComponent: React.FC<StreamMessageProps> = ({ message, classNa
                       <div key={idx} className="prose prose-sm dark:prose-invert max-w-none">
                         <ReactMarkdown
                           remarkPlugins={[remarkGfm]}
-                          components={{
-                            code({ node, inline, className, children, ...props }: any) {
-                              const match = /language-(\w+)/.exec(className || '');
-                              return !inline && match ? (
-                                <SyntaxHighlighter
-                                  style={syntaxTheme}
-                                  language={match[1]}
-                                  PreTag="div"
-                                  {...props}
-                                >
-                                  {String(children).replace(/\n$/, '')}
-                                </SyntaxHighlighter>
-                              ) : (
-                                <code className={className} {...props}>
-                                  {children}
-                                </code>
-                              );
-                            }
-                          }}
+                          components={markdownComponents(syntaxTheme)}
                         >
                           {textContent}
                         </ReactMarkdown>
@@ -660,25 +659,7 @@ const StreamMessageComponent: React.FC<StreamMessageProps> = ({ message, classNa
                   <div className="prose prose-sm dark:prose-invert max-w-none">
                     <ReactMarkdown
                       remarkPlugins={[remarkGfm]}
-                      components={{
-                        code({ node, inline, className, children, ...props }: any) {
-                          const match = /language-(\w+)/.exec(className || '');
-                          return !inline && match ? (
-                            <SyntaxHighlighter
-                              style={syntaxTheme}
-                              language={match[1]}
-                              PreTag="div"
-                              {...props}
-                            >
-                              {String(children).replace(/\n$/, '')}
-                            </SyntaxHighlighter>
-                          ) : (
-                            <code className={className} {...props}>
-                              {children}
-                            </code>
-                          );
-                        }
-                      }}
+                      components={markdownComponents(syntaxTheme)}
                     >
                       {message.result}
                     </ReactMarkdown>

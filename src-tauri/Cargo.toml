@@ -57,6 +57,7 @@ sha2 = "0.10"
 zstd = "0.13"
 uuid = { version = "1.6", features = ["v4", "serde"] }
 walkdir = "2"
+open = "5"
 serde_yaml = "0.9"
 axum = { version = "0.8", features = ["ws"] }
 tower = "0.5"

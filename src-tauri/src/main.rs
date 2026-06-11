@@ -56,7 +56,28 @@ fn main() {
     // Initialize logger
     env_logger::init();
 
+    // Intercept external navigation and open in system browser instead
+    let nav_plugin = tauri::plugin::Builder::<tauri::Wry>::new("nav-guard")
+        .on_navigation(|_webview, url| {
+            let url_str = url.as_str();
+            if url_str.starts_with("tauri://")
+                || url_str.starts_with("http://localhost")
+                || url_str.starts_with("https://localhost")
+                || url_str.starts_with("http://127.0.0.1")
+                || url_str.starts_with("asset://")
+            {
+                return true;
+            }
+            if url_str.starts_with("http://") || url_str.starts_with("https://") {
+                let _ = open::that(url_str);
+                return false;
+            }
+            true
+        })
+        .build();
+
     tauri::Builder::default()
+        .plugin(nav_plugin)
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_shell::init())
         .setup(|app| {

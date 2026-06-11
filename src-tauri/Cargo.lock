@@ -3566,6 +3566,7 @@ dependencies = [
  "libc",
  "log",
  "objc",
+ "open",
  "regex",
  "reqwest",
  "rusqlite",
