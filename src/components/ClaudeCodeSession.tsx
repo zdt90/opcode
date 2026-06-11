@@ -5,6 +5,8 @@ import {
   ChevronDown,
   GitBranch,
   ChevronUp,
+  ChevronsUp,
+  ChevronsDown,
   X,
   Hash,
   Wrench
@@ -277,6 +279,56 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
     estimateSize: () => 150, // Estimate, will be dynamically measured
     overscan: 5,
   });
+
+  // Indices of "real" user messages (actual prompts) within displayableMessages,
+  // used by the prev/next user-message navigation. Tool-result-only rows and
+  // compact summaries are intentionally excluded.
+  const userMessageIndices = useMemo(() => {
+    const indices: number[] = [];
+    displayableMessages.forEach((m, i) => {
+      if (m.type !== "user" || m.isMeta) return;
+      if ((m as any).isCompactSummary === true || (m.message as any)?.isCompactSummary === true) return;
+      const content = m.message?.content ?? (m as any).content;
+      const isReal =
+        typeof content === "string"
+          ? content.trim().length > 0
+          : Array.isArray(content)
+          ? content.some((c: any) => c.type === "text")
+          : false;
+      if (isReal) indices.push(i);
+    });
+    return indices;
+  }, [displayableMessages]);
+
+  // Index of the topmost currently-visible message row.
+  const getCurrentTopIndex = () => {
+    const offset = parentRef.current?.scrollTop ?? 0;
+    const items = rowVirtualizer.getVirtualItems();
+    for (const it of items) {
+      if (it.start >= offset - 4) return it.index;
+    }
+    return items.length > 0 ? items[items.length - 1].index : 0;
+  };
+
+  const jumpToPreviousUserMessage = () => {
+    const current = getCurrentTopIndex();
+    let target: number | undefined;
+    for (const i of userMessageIndices) {
+      if (i < current) target = i;
+      else break;
+    }
+    if (target !== undefined) {
+      rowVirtualizer.scrollToIndex(target, { align: "start", behavior: "smooth" });
+    }
+  };
+
+  const jumpToNextUserMessage = () => {
+    const current = getCurrentTopIndex();
+    const target = userMessageIndices.find((i) => i > current);
+    if (target !== undefined) {
+      rowVirtualizer.scrollToIndex(target, { align: "start", behavior: "smooth" });
+    }
+  };
 
   // Debug logging
   useEffect(() => {
@@ -1464,77 +1516,114 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
               transition={{ delay: 0.5 }}
               className="fixed bottom-32 right-6 z-50"
             >
-              <div className="flex items-center bg-background/95 backdrop-blur-md border rounded-full shadow-lg overflow-hidden">
-                <TooltipSimple content="Scroll to top" side="top">
-                  <motion.div
-                    whileTap={{ scale: 0.97 }}
-                    transition={{ duration: 0.15 }}
-                  >
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => {
-                      // Use virtualizer to scroll to the first item
-                      if (displayableMessages.length > 0) {
-                        // Scroll to top of the container
-                        parentRef.current?.scrollTo({
-                          top: 0,
-                          behavior: 'smooth'
-                        });
-                        
-                        // After smooth scroll completes, trigger a small scroll to ensure rendering
-                        setTimeout(() => {
-                          if (parentRef.current) {
-                            // Scroll down 1px then back to 0 to trigger virtualizer update
-                            parentRef.current.scrollTop = 1;
-                            requestAnimationFrame(() => {
-                              if (parentRef.current) {
-                                parentRef.current.scrollTop = 0;
-                              }
-                            });
-                          }
-                        }, 500); // Wait for smooth scroll to complete
-                      }
-                    }}
-                      className="px-3 py-2 hover:bg-accent rounded-none"
+              <div className="flex flex-col gap-2 items-end">
+                {/* Pill 1: jump to previous / next user message */}
+                <div className="flex items-center bg-background/95 backdrop-blur-md border rounded-full shadow-lg overflow-hidden opacity-45 hover:opacity-100 transition-opacity duration-200">
+                  <TooltipSimple content="Previous user message" side="top">
+                    <motion.div
+                      whileTap={{ scale: 0.97 }}
+                      transition={{ duration: 0.15 }}
                     >
-                      <ChevronUp className="h-4 w-4" />
-                    </Button>
-                  </motion.div>
-                </TooltipSimple>
-                <div className="w-px h-4 bg-border" />
-                <TooltipSimple content="Scroll to bottom" side="top">
-                  <motion.div
-                    whileTap={{ scale: 0.97 }}
-                    transition={{ duration: 0.15 }}
-                  >
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => {
-                        // Use the improved scrolling method for manual scroll to bottom
-                        if (displayableMessages.length > 0) {
-                          const scrollElement = parentRef.current;
-                          if (scrollElement) {
-                            // First, scroll using virtualizer to get close to the bottom
-                            rowVirtualizer.scrollToIndex(displayableMessages.length - 1, { align: 'end', behavior: 'auto' });
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={jumpToPreviousUserMessage}
+                        className="px-3 py-2 hover:bg-accent rounded-none"
+                      >
+                        <ChevronUp className="h-4 w-4" />
+                      </Button>
+                    </motion.div>
+                  </TooltipSimple>
+                  <div className="w-px h-4 bg-border" />
+                  <TooltipSimple content="Next user message" side="top">
+                    <motion.div
+                      whileTap={{ scale: 0.97 }}
+                      transition={{ duration: 0.15 }}
+                    >
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={jumpToNextUserMessage}
+                        className="px-3 py-2 hover:bg-accent rounded-none"
+                      >
+                        <ChevronDown className="h-4 w-4" />
+                      </Button>
+                    </motion.div>
+                  </TooltipSimple>
+                </div>
+                {/* Pill 2: scroll to top / bottom */}
+                <div className="flex items-center bg-background/95 backdrop-blur-md border rounded-full shadow-lg overflow-hidden opacity-45 hover:opacity-100 transition-opacity duration-200">
+                  <TooltipSimple content="Scroll to top" side="top">
+                    <motion.div
+                      whileTap={{ scale: 0.97 }}
+                      transition={{ duration: 0.15 }}
+                    >
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => {
+                          // Use virtualizer to scroll to the first item
+                          if (displayableMessages.length > 0) {
+                            // Scroll to top of the container
+                            parentRef.current?.scrollTo({
+                              top: 0,
+                              behavior: 'smooth'
+                            });
 
-                            // Then use direct scroll to ensure we reach the absolute bottom
-                            requestAnimationFrame(() => {
-                              scrollElement.scrollTo({
-                                top: scrollElement.scrollHeight,
-                                behavior: 'smooth'
-                              });
-                            });
+                            // After smooth scroll completes, trigger a small scroll to ensure rendering
+                            setTimeout(() => {
+                              if (parentRef.current) {
+                                // Scroll down 1px then back to 0 to trigger virtualizer update
+                                parentRef.current.scrollTop = 1;
+                                requestAnimationFrame(() => {
+                                  if (parentRef.current) {
+                                    parentRef.current.scrollTop = 0;
+                                  }
+                                });
+                              }
+                            }, 500); // Wait for smooth scroll to complete
                           }
-                        }
-                      }}
-                      className="px-3 py-2 hover:bg-accent rounded-none"
+                        }}
+                        className="px-3 py-2 hover:bg-accent rounded-none"
+                      >
+                        <ChevronsUp className="h-4 w-4" />
+                      </Button>
+                    </motion.div>
+                  </TooltipSimple>
+                  <div className="w-px h-4 bg-border" />
+                  <TooltipSimple content="Scroll to bottom" side="top">
+                    <motion.div
+                      whileTap={{ scale: 0.97 }}
+                      transition={{ duration: 0.15 }}
                     >
-                      <ChevronDown className="h-4 w-4" />
-                    </Button>
-                  </motion.div>
-                </TooltipSimple>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => {
+                          // Use the improved scrolling method for manual scroll to bottom
+                          if (displayableMessages.length > 0) {
+                            const scrollElement = parentRef.current;
+                            if (scrollElement) {
+                              // First, scroll using virtualizer to get close to the bottom
+                              rowVirtualizer.scrollToIndex(displayableMessages.length - 1, { align: 'end', behavior: 'auto' });
+
+                              // Then use direct scroll to ensure we reach the absolute bottom
+                              requestAnimationFrame(() => {
+                                scrollElement.scrollTo({
+                                  top: scrollElement.scrollHeight,
+                                  behavior: 'smooth'
+                                });
+                              });
+                            }
+                          }
+                        }}
+                        className="px-3 py-2 hover:bg-accent rounded-none"
+                      >
+                        <ChevronsDown className="h-4 w-4" />
+                      </Button>
+                    </motion.div>
+                  </TooltipSimple>
+                </div>
               </div>
             </motion.div>
           )}

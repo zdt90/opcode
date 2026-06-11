@@ -809,18 +809,17 @@ const StreamMessageComponent: React.FC<StreamMessageProps> = ({ message, classNa
           className={cn(className)}
           // Card hardcodes its background via inline style, which beats Tailwind
           // bg-* classes; override inline so the user message reads as a soft,
-          // distinct blue tint across all themes. A muted steel-blue (lower
-          // saturation/lightness) keeps it distinct without making light text
-          // glare.
+          // distinct tint across all themes. A low-alpha indigo fill with a
+          // slightly brighter indigo border feels modern without glaring.
           style={{
-            backgroundColor: "rgba(96, 134, 191, 0.16)",
-            borderColor: "rgba(96, 134, 191, 0.42)",
+            backgroundColor: "rgba(99, 102, 241, 0.12)",
+            borderColor: "rgba(129, 140, 248, 0.5)",
             color: "var(--color-card-foreground)",
           }}
         >
           <CardContent className="p-4">
             <div className="flex items-start gap-3">
-              <User className="h-5 w-5 text-blue-500 mt-0.5" />
+              <User className="h-5 w-5 text-indigo-400 mt-0.5" />
               {body}
             </div>
           </CardContent>
