@@ -1,3 +1,28 @@
+> [!IMPORTANT]
+> **This is a customized fork of [winfunc/opcode](https://github.com/winfunc/opcode).**
+> It tracks upstream but adds a number of personal customizations on top. The
+> sections below summarize the main changes made in this fork (since commit
+> [`c0be1b8`](https://github.com/winfunc/opcode/commit/c0be1b87242ef70d8e912d4575f80976ff6b75e1)).
+
+### ✨ Fork Features
+
+- **Mid-turn message injection** — send extra messages while a turn is running.
+- **Simultaneous send & stop buttons** — show both controls at once.
+- **Collapsible session sidebar** — resizable sidebar with a native context menu.
+- **Copy button on code blocks** — one-click copy for chat code blocks.
+- **Drag-and-drop files** — drag any file or folder into the prompt.
+- **Paste image to temp file** — paste an image directly as a temp file.
+- **Session archiving** — archive sessions you no longer need.
+- **Collapsible tool cards** — compact, collapsible tool messages with colored accents.
+- **Prev/next user-message navigation** — floating pills to jump between user messages, with indigo-tinted user messages.
+
+### 🐛 Fork Bugfixes
+
+- **Loading spinner hang** — fix the spinner getting stuck after certain turns.
+- **External URL navigation** — block external URL navigation at the webview level for safety.
+- **Chat message spacing** — remove abnormally large gaps between chat messages.
+
+---
 
 <div align="center">
   <img src="src-tauri/icons/icon.png" alt="opcode Logo" width="120" height="120">
