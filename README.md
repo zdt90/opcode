@@ -15,6 +15,7 @@
 - **Paste image to temp file** — paste an image directly as a temp file.
 - **Collapsible tool cards** — compact, collapsible tool messages with colored accents.
 - **Prev/next user-message navigation** — floating pills to jump between user messages, with indigo-tinted user messages.
+- **Interface size scaling** — scale the whole UI (small / medium / large) from Settings, VSCode-style.
 
 ### 🐛 Fork Bugfixes
 

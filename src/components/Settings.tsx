@@ -28,6 +28,7 @@ import { HooksEditor } from "./HooksEditor";
 import { SlashCommandsManager } from "./SlashCommandsManager";
 import { ProxySettings } from "./ProxySettings";
 import { useTheme, useTrackEvent } from "@/hooks";
+import { useUIScale } from "@/contexts/UIScaleContext";
 import { analytics } from "@/lib/analytics";
 import { TabPersistenceService } from "@/services/tabPersistence";
 
@@ -83,6 +84,9 @@ export const Settings: React.FC<SettingsProps> = ({
   
   // Theme hook
   const { theme, setTheme, customColors, setCustomColors } = useTheme();
+
+  // UI scale hook
+  const { scale, setScale } = useUIScale();
   
   // Proxy state
   const [proxySettingsChanged, setProxySettingsChanged] = useState(false);
@@ -470,7 +474,34 @@ export const Settings: React.FC<SettingsProps> = ({
                         </button>
                       </div>
                     </div>
-                    
+
+                    {/* Interface Size Selector */}
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <Label>Interface size</Label>
+                        <p className="text-caption text-muted-foreground mt-1">
+                          Scale the overall font and layout size
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-1 p-1 bg-muted/30 rounded-lg">
+                        {(['small', 'medium', 'large'] as const).map((size) => (
+                          <button
+                            key={size}
+                            onClick={() => setScale(size)}
+                            className={cn(
+                              "flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition-all capitalize",
+                              scale === size
+                                ? "bg-background shadow-sm"
+                                : "hover:bg-background/50"
+                            )}
+                          >
+                            {scale === size && <Check className="h-3 w-3" />}
+                            {size}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
                     {/* Custom Color Editor */}
                     {theme === 'custom' && (
                       <div className="space-y-4 p-4 border rounded-lg bg-muted/20">

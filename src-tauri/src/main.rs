@@ -54,6 +54,56 @@ use tauri::Manager;
 #[cfg(target_os = "macos")]
 use window_vibrancy::{apply_vibrancy, NSVisualEffectMaterial};
 
+/// Clamps the window so it stays within the bounds of the monitor it is on.
+/// Used when the screen resolution changes so the window never ends up larger
+/// than, or positioned off, the current screen.
+fn clamp_window_to_monitor(window: &tauri::WebviewWindow) {
+    let monitor = match window.current_monitor() {
+        Ok(Some(m)) => m,
+        _ => return,
+    };
+    let m_size = monitor.size();
+    let m_pos = monitor.position();
+
+    let win_size = match window.outer_size() {
+        Ok(s) => s,
+        Err(_) => return,
+    };
+    let win_pos = match window.outer_position() {
+        Ok(p) => p,
+        Err(_) => return,
+    };
+
+    // Never let the window be larger than the monitor.
+    let new_w = win_size.width.min(m_size.width);
+    let new_h = win_size.height.min(m_size.height);
+
+    let max_x = m_pos.x + m_size.width as i32;
+    let max_y = m_pos.y + m_size.height as i32;
+
+    let mut new_x = win_pos.x;
+    let mut new_y = win_pos.y;
+    if new_x + new_w as i32 > max_x {
+        new_x = max_x - new_w as i32;
+    }
+    if new_y + new_h as i32 > max_y {
+        new_y = max_y - new_h as i32;
+    }
+    if new_x < m_pos.x {
+        new_x = m_pos.x;
+    }
+    if new_y < m_pos.y {
+        new_y = m_pos.y;
+    }
+
+    if new_w != win_size.width || new_h != win_size.height {
+        let _ = window.set_size(tauri::PhysicalSize::new(new_w, new_h));
+    }
+    if new_x != win_pos.x || new_y != win_pos.y {
+        let _ = window.set_position(tauri::PhysicalPosition::new(new_x, new_y));
+    }
+}
+
 fn main() {
     // Initialize logger
     env_logger::init();
@@ -170,6 +220,23 @@ fn main() {
 
             // Initialize Claude process state
             app.manage(ClaudeProcessState::default());
+
+            // Keep the window within the current monitor's bounds (e.g. when the
+            // screen resolution changes) so it never ends up off-screen.
+            if let Some(main_window) = app.get_webview_window("main") {
+                let win_for_event = main_window.clone();
+                main_window.on_window_event(move |event| {
+                    use tauri::WindowEvent;
+                    if matches!(
+                        event,
+                        WindowEvent::Resized(_)
+                            | WindowEvent::Moved(_)
+                            | WindowEvent::ScaleFactorChanged { .. }
+                    ) {
+                        clamp_window_to_monitor(&win_for_event);
+                    }
+                });
+            }
 
             // Apply window vibrancy with rounded corners on macOS
             #[cfg(target_os = "macos")]
