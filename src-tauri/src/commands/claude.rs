@@ -948,6 +948,8 @@ pub async fn execute_claude_code(
 
     let args = vec![
         "--print".to_string(),
+        "--model".to_string(),
+        model.clone(),
         "--output-format".to_string(),
         "stream-json".to_string(),
         "--input-format".to_string(),
@@ -1042,12 +1044,17 @@ pub async fn inject_claude_message(
     let mut stdin_guard = claude_state.current_stdin.lock().await;
 
     if let Some(ref mut stdin) = *stdin_guard {
-        // Claude's stream-json input format expects a JSON object per line
+        // Claude's stream-json input format expects a JSON object per line.
+        // Use the same content shape as the initial prompt (an array of typed
+        // content blocks) so both code paths produce identical message structure.
         let json_msg = serde_json::json!({
             "type": "user",
             "message": {
                 "role": "user",
-                "content": message
+                "content": [{
+                    "type": "text",
+                    "text": message
+                }]
             }
         });
         let line = format!("{}\n", json_msg.to_string());
@@ -2380,16 +2387,6 @@ pub async fn get_session_name(session_id: String) -> Result<Option<String>, Stri
         .get(&session_id)
         .and_then(|v| v.as_str())
         .map(|s| s.to_string()))
-}
-
-/// Returns a setting value from localStorage-backed app settings (thin wrapper)
-/// Used by the StartupIntro component via the api module.
-#[tauri::command]
-pub async fn get_setting(key: String) -> Result<Option<String>, String> {
-    // Settings for desktop are stored in localStorage via the web layer;
-    // for now return None so callers fall back to defaults.
-    log::debug!("get_setting called for key: {}", key);
-    Ok(None)
 }
 
 #[tauri::command]

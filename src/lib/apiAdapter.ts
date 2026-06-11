@@ -256,7 +256,6 @@ function mapCommandToEndpoint(command: string, _params?: any): string {
     'delete_session': '/api/sessions/{sessionId}/delete',
     'rename_session': '/api/sessions/{sessionId}/rename',
     'get_session_name': '/api/sessions/{sessionId}/name',
-    'get_setting': '/api/settings/app/{key}',
     
     // Slash commands
     'slash_commands_list': '/api/slash-commands',
