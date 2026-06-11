@@ -2,8 +2,6 @@
  * Sidebar component — collapsible left panel showing projects & sessions.
  */
 
-console.log('[Sidebar] BUILD v1 - loaded');
-
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { ChevronLeft, ChevronRight, RefreshCw } from 'lucide-react';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -65,15 +63,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const pollRunningSessions = async () => {
     try {
       const claudeRuns = await apiCall<Array<{ process_type: { ClaudeSession?: { session_id: string } } }>>('list_running_claude_sessions');
-      console.log('[Sidebar] running claude sessions:', JSON.stringify(claudeRuns));
       const ids = new Set(
         claudeRuns
           .map((r) => r.process_type?.ClaudeSession?.session_id)
           .filter((id): id is string => Boolean(id))
       );
       setRunningSessionIds(ids);
-    } catch (_err) {
-      console.log('[Sidebar] pollRunningSessions error:', _err);
+    } catch {
+      // Polling failures are non-fatal; ignore and retry on the next interval
     }
   };
 
