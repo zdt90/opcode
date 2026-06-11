@@ -948,6 +948,8 @@ pub async fn execute_claude_code(
 
     let args = vec![
         "--print".to_string(),
+        "--model".to_string(),
+        model.clone(),
         "--output-format".to_string(),
         "stream-json".to_string(),
         "--input-format".to_string(),
