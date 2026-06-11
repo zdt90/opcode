@@ -1031,25 +1031,33 @@ const FloatingPromptInputInner = (
                   </div>
                 </div>
 
-                <TooltipSimple content="Send message" side="top">
-                  <motion.div
-                    whileTap={{ scale: 0.97 }}
-                    transition={{ duration: 0.15 }}
-                  >
-                    <Button
-                      onClick={handleSend}
-                      disabled={!prompt.trim() || disabled}
-                      size="default"
-                      className="min-w-[60px]"
-                    >
-                      {isLoading ? (
-                        <div className="rotating-symbol text-primary-foreground" />
-                      ) : (
+                <div className="flex gap-1">
+                  <TooltipSimple content="Send message" side="top">
+                    <motion.div whileTap={{ scale: 0.97 }} transition={{ duration: 0.15 }}>
+                      <Button
+                        onClick={handleSend}
+                        disabled={!prompt.trim() || disabled}
+                        size="default"
+                        className="min-w-[60px]"
+                      >
                         <Send className="h-4 w-4" />
-                      )}
-                    </Button>
-                  </motion.div>
-                </TooltipSimple>
+                      </Button>
+                    </motion.div>
+                  </TooltipSimple>
+                  <TooltipSimple content="Stop generation" side="top">
+                    <motion.div whileTap={{ scale: 0.97 }} transition={{ duration: 0.15 }}>
+                      <Button
+                        onClick={onCancel}
+                        disabled={!isLoading}
+                        variant="destructive"
+                        size="icon"
+                        className={cn("h-9 w-9 transition-all", !isLoading && "opacity-30 cursor-not-allowed")}
+                      >
+                        <Square className="h-4 w-4" />
+                      </Button>
+                    </motion.div>
+                  </TooltipSimple>
+                </div>
               </div>
             </motion.div>
           </motion.div>
@@ -1263,26 +1271,36 @@ const FloatingPromptInputInner = (
                     </motion.div>
                   </TooltipSimple>
 
-                  <TooltipSimple content={isLoading ? "Stop generation" : "Send message (Enter)"} side="top">
-                    <motion.div
-                      whileTap={{ scale: 0.97 }}
-                      transition={{ duration: 0.15 }}
-                    >
+                  <TooltipSimple content="Send message (Enter)" side="top">
+                    <motion.div whileTap={{ scale: 0.97 }} transition={{ duration: 0.15 }}>
                       <Button
-                        onClick={isLoading ? onCancel : handleSend}
-                        disabled={isLoading ? false : (!prompt.trim() || disabled)}
-                        variant={isLoading ? "destructive" : prompt.trim() ? "default" : "ghost"}
+                        onClick={handleSend}
+                        disabled={!prompt.trim() || disabled}
+                        variant={prompt.trim() ? "default" : "ghost"}
                         size="icon"
                         className={cn(
                           "h-8 w-8 transition-all",
-                          prompt.trim() && !isLoading && "shadow-sm"
+                          prompt.trim() && "shadow-sm"
                         )}
                       >
-                        {isLoading ? (
-                          <Square className="h-4 w-4" />
-                        ) : (
-                          <Send className="h-4 w-4" />
+                        <Send className="h-4 w-4" />
+                      </Button>
+                    </motion.div>
+                  </TooltipSimple>
+
+                  <TooltipSimple content="Stop generation" side="top">
+                    <motion.div whileTap={{ scale: 0.97 }} transition={{ duration: 0.15 }}>
+                      <Button
+                        onClick={onCancel}
+                        disabled={!isLoading}
+                        variant="destructive"
+                        size="icon"
+                        className={cn(
+                          "h-8 w-8 transition-all",
+                          !isLoading && "opacity-30 cursor-not-allowed"
                         )}
+                      >
+                        <Square className="h-4 w-4" />
                       </Button>
                     </motion.div>
                   </TooltipSimple>
