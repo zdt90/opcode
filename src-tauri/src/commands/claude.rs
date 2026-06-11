@@ -2360,11 +2360,18 @@ pub async fn delete_session(session_id: String) -> Result<(), String> {
         return Err(format!("Session not found: {}", session_id));
     }
 
-    // Also remove from metadata
+    // Also remove from metadata and archived list
     let mut meta = read_opcode_metadata();
-    if meta.remove(&session_id).is_some() {
-        let _ = write_opcode_metadata(&meta);
-    }
+    meta.remove(&session_id);
+    let mut archived = get_archived_sessions_from_meta(&meta);
+    archived.retain(|id| id != &session_id);
+    meta.insert(
+        ARCHIVED_SESSIONS_KEY.to_string(),
+        serde_json::Value::Array(
+            archived.into_iter().map(serde_json::Value::String).collect(),
+        ),
+    );
+    let _ = write_opcode_metadata(&meta);
 
     Ok(())
 }
@@ -2387,6 +2394,101 @@ pub async fn get_session_name(session_id: String) -> Result<Option<String>, Stri
         .get(&session_id)
         .and_then(|v| v.as_str())
         .map(|s| s.to_string()))
+}
+
+/// Key used in opcode-metadata.json to store the list of archived session IDs
+const ARCHIVED_SESSIONS_KEY: &str = "__archived_sessions__";
+
+fn get_archived_sessions_from_meta(
+    meta: &serde_json::Map<String, serde_json::Value>,
+) -> Vec<String> {
+    meta.get(ARCHIVED_SESSIONS_KEY)
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Archives a session: hides it from the normal list without deleting the .jsonl file.
+#[tauri::command]
+pub async fn archive_session(session_id: String) -> Result<(), String> {
+    log::info!("Archiving session: {}", session_id);
+    let mut meta = read_opcode_metadata();
+    let mut archived = get_archived_sessions_from_meta(&meta);
+    if !archived.contains(&session_id) {
+        archived.push(session_id);
+    }
+    meta.insert(
+        ARCHIVED_SESSIONS_KEY.to_string(),
+        serde_json::Value::Array(
+            archived.into_iter().map(serde_json::Value::String).collect(),
+        ),
+    );
+    write_opcode_metadata(&meta)
+}
+
+/// Unarchives a session: makes it visible in the normal list again.
+#[tauri::command]
+pub async fn unarchive_session(session_id: String) -> Result<(), String> {
+    log::info!("Unarchiving session: {}", session_id);
+    let mut meta = read_opcode_metadata();
+    let mut archived = get_archived_sessions_from_meta(&meta);
+    archived.retain(|id| id != &session_id);
+    meta.insert(
+        ARCHIVED_SESSIONS_KEY.to_string(),
+        serde_json::Value::Array(
+            archived.into_iter().map(serde_json::Value::String).collect(),
+        ),
+    );
+    write_opcode_metadata(&meta)
+}
+
+/// Returns the list of archived session IDs.
+#[tauri::command]
+pub async fn get_archived_sessions() -> Result<Vec<String>, String> {
+    let meta = read_opcode_metadata();
+    Ok(get_archived_sessions_from_meta(&meta))
+}
+
+/// Writes pasted image bytes (base64 data URL) to a temp file and returns the path.
+#[tauri::command]
+pub async fn save_temp_image(data_url: String) -> Result<String, String> {
+    use base64::Engine as _;
+
+    // Parse "data:image/png;base64,<data>" or bare base64
+    let (ext, b64) = if let Some(comma_pos) = data_url.find(',') {
+        let header = &data_url[..comma_pos];
+        let raw = &data_url[comma_pos + 1..];
+        // Extract extension from MIME, e.g. "data:image/png;base64"
+        let ext = header
+            .trim_start_matches("data:")
+            .split(';')
+            .next()
+            .and_then(|mime| mime.split('/').nth(1))
+            .unwrap_or("png")
+            .to_string();
+        (ext, raw)
+    } else {
+        ("png".to_string(), data_url.as_str())
+    };
+
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(b64)
+        .map_err(|e| format!("Failed to decode base64 image: {}", e))?;
+
+    let filename = format!(
+        "opcode-paste-{}.{}",
+        uuid::Uuid::new_v4().to_string().replace('-', ""),
+        ext
+    );
+    let path = std::env::temp_dir().join(&filename);
+
+    fs::write(&path, &bytes).map_err(|e| format!("Failed to write temp image: {}", e))?;
+
+    Ok(path.to_string_lossy().to_string())
 }
 
 #[tauri::command]

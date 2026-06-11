@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { ChevronRight, ChevronDown, FolderOpen, Loader2, Plus } from 'lucide-react';
+import { ChevronRight, ChevronDown, FolderOpen, Loader2, Plus, Archive } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { apiCall } from '@/lib/apiAdapter';
 import { SidebarSessionItem } from './SidebarSessionItem';
@@ -22,7 +22,6 @@ interface SidebarProjectItemProps {
 }
 
 function getProjectBaseName(path: string): string {
-  // Handle both Unix and Windows-style paths
   const parts = path.replace(/\\/g, '/').split('/').filter(Boolean);
   return parts[parts.length - 1] || path;
 }
@@ -41,10 +40,11 @@ export const SidebarProjectItem: React.FC<SidebarProjectItemProps> = ({
   const [loading, setLoading] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [sessionNames, setSessionNames] = useState<Record<string, string>>({});
+  const [archivedIds, setArchivedIds] = useState<Set<string>>(new Set());
+  const [showArchived, setShowArchived] = useState(false);
 
   const projectName = getProjectBaseName(project.path);
 
-  // When the parent bumps reloadSignal, reload sessions if already expanded
   useEffect(() => {
     if (reloadSignal && reloadSignal > 0 && isExpanded) {
       loadSessions(true);
@@ -56,11 +56,14 @@ export const SidebarProjectItem: React.FC<SidebarProjectItemProps> = ({
     if (loaded && !force) return;
     setLoading(true);
     try {
-      const result = await apiCall<Session[]>('get_project_sessions', { projectId: project.id });
+      const [result, archived] = await Promise.all([
+        apiCall<Session[]>('get_project_sessions', { projectId: project.id }),
+        apiCall<string[]>('get_archived_sessions', {}),
+      ]);
       setSessions(result);
+      setArchivedIds(new Set(archived));
       setLoaded(true);
 
-      // Load custom names for all sessions
       const namesMap: Record<string, string> = {};
       await Promise.all(
         result.map(async (s) => {
@@ -97,10 +100,19 @@ export const SidebarProjectItem: React.FC<SidebarProjectItemProps> = ({
 
   const handleDeleteSession = (sessionId: string) => {
     setSessions((prev) => prev.filter((s) => s.id !== sessionId));
+    setArchivedIds((prev) => { const n = new Set(prev); n.delete(sessionId); return n; });
   };
 
   const handleRenameSession = (sessionId: string, newName: string) => {
     setSessionNames((prev) => ({ ...prev, [sessionId]: newName }));
+  };
+
+  const handleArchiveSession = (sessionId: string) => {
+    setArchivedIds((prev) => new Set([...prev, sessionId]));
+  };
+
+  const handleUnarchiveSession = (sessionId: string) => {
+    setArchivedIds((prev) => { const n = new Set(prev); n.delete(sessionId); return n; });
   };
 
   const handleProjectContextMenu = async (e: React.MouseEvent) => {
@@ -136,6 +148,11 @@ export const SidebarProjectItem: React.FC<SidebarProjectItemProps> = ({
     }
   };
 
+  const visibleSessions = sessions.filter((s) =>
+    showArchived ? archivedIds.has(s.id) : !archivedIds.has(s.id)
+  );
+  const archivedCount = sessions.filter((s) => archivedIds.has(s.id)).length;
+
   return (
     <div className="mb-1">
       {/* Project header row */}
@@ -161,30 +178,49 @@ export const SidebarProjectItem: React.FC<SidebarProjectItemProps> = ({
       {isExpanded && (
         <div className="pl-5 mt-0.5 space-y-0.5">
           {/* New Session button */}
-          <button
-            onClick={(e) => { e.stopPropagation(); onNewSession(project.path); }}
-            className="w-full flex items-center gap-1.5 px-2 py-1.5 rounded-md text-xs text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors"
-          >
-            <Plus size={11} />
-            New Session
-          </button>
-          {sessions.length === 0 && !loading && (
-            <p className="text-[10px] text-muted-foreground px-2 py-1">No sessions</p>
+          {!showArchived && (
+            <button
+              onClick={(e) => { e.stopPropagation(); onNewSession(project.path); }}
+              className="w-full flex items-center gap-1.5 px-2 py-1.5 rounded-md text-xs text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors"
+            >
+              <Plus size={11} />
+              New Session
+            </button>
           )}
-          {sessions.map((session) => (
+          {visibleSessions.length === 0 && !loading && (
+            <p className="text-[10px] text-muted-foreground px-2 py-1">
+              {showArchived ? 'No archived sessions' : 'No sessions'}
+            </p>
+          )}
+          {visibleSessions.map((session) => (
             <SidebarSessionItem
               key={session.id}
               session={session}
               isActive={session.id === activeSessionId}
               isRunning={runningSessionIds ? runningSessionIds.has(session.id) : false}
+              isArchived={archivedIds.has(session.id)}
               displayName={getDisplayName(session)}
               onClick={() => onSessionSelect(session, project.path, getDisplayName(session))}
               onOpenInNewTab={() => onSessionSelectNewTab(session, project.path, getDisplayName(session))}
               onRefreshSessions={() => loadSessions(true)}
               onDelete={handleDeleteSession}
               onRename={handleRenameSession}
+              onArchive={handleArchiveSession}
+              onUnarchive={handleUnarchiveSession}
             />
           ))}
+          {/* Show/Hide Archived toggle */}
+          {archivedCount > 0 && (
+            <button
+              onClick={() => setShowArchived((v) => !v)}
+              className="w-full flex items-center gap-1.5 px-2 py-1.5 rounded-md text-xs text-muted-foreground/60 hover:text-muted-foreground hover:bg-accent/30 transition-colors"
+            >
+              <Archive size={10} />
+              {showArchived
+                ? 'Hide Archived'
+                : `Show Archived (${archivedCount})`}
+            </button>
+          )}
         </div>
       )}
     </div>

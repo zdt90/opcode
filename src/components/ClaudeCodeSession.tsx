@@ -86,6 +86,11 @@ interface ClaudeCodeSessionProps {
    * Callback when project path changes
    */
   onProjectPathChange?: (path: string) => void;
+  /**
+   * Whether this session belongs to the active tab (used by FloatingPromptInput
+   * to guard against duplicate drag-drop handling across mounted tabs).
+   */
+  isActive?: boolean;
 }
 
 /**
@@ -100,6 +105,7 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
   className,
   onStreamingChange,
   onProjectPathChange,
+  isActive = true,
 }) => {
   const [projectPath] = useState(initialProjectPath || session?.project_path || "");
   const [messages, setMessages] = useState<ClaudeStreamMessage[]>([]);
@@ -1543,6 +1549,7 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
               isLoading={isLoading}
               disabled={!projectPath}
               projectPath={projectPath}
+              isActive={isActive}
               extraMenuItems={
                 <>
                   {effectiveSession && (
