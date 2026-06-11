@@ -32,6 +32,7 @@ temp_lib/
 AGENTS.md
 CLAUDE.md
 *_TASK.md
+TODO.md
 
 # Claude project-specific files
 .claude/
