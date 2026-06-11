@@ -1517,9 +1517,9 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
               className="fixed bottom-32 right-6 z-50"
             >
               <div className="flex flex-col gap-2 items-end">
-                {/* Pill 1: jump to previous / next user message */}
-                <div className="flex items-center bg-background/95 backdrop-blur-md border rounded-full shadow-lg overflow-hidden opacity-45 hover:opacity-100 transition-opacity duration-200">
-                  <TooltipSimple content="Previous user message" side="top">
+                {/* Pill 1: jump to previous / next user message (vertical pill) */}
+                <div className="flex flex-col items-center bg-background/95 backdrop-blur-md border rounded-full shadow-lg overflow-hidden opacity-45 hover:opacity-100 transition-opacity duration-200">
+                  <TooltipSimple content="Previous user message" side="top" align="end" alignOffset={-18}>
                     <motion.div
                       whileTap={{ scale: 0.97 }}
                       transition={{ duration: 0.15 }}
@@ -1528,14 +1528,14 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
                         variant="ghost"
                         size="sm"
                         onClick={jumpToPreviousUserMessage}
-                        className="px-3 py-2 hover:bg-accent rounded-none"
+                        className="px-2 py-2 hover:bg-accent rounded-none"
                       >
                         <ChevronUp className="h-4 w-4" />
                       </Button>
                     </motion.div>
                   </TooltipSimple>
-                  <div className="w-px h-4 bg-border" />
-                  <TooltipSimple content="Next user message" side="top">
+                  <div className="h-px w-4 bg-border" />
+                  <TooltipSimple content="Next user message" side="top" align="end" alignOffset={-18}>
                     <motion.div
                       whileTap={{ scale: 0.97 }}
                       transition={{ duration: 0.15 }}
@@ -1544,7 +1544,7 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
                         variant="ghost"
                         size="sm"
                         onClick={jumpToNextUserMessage}
-                        className="px-3 py-2 hover:bg-accent rounded-none"
+                        className="px-2 py-2 hover:bg-accent rounded-none"
                       >
                         <ChevronDown className="h-4 w-4" />
                       </Button>
@@ -1591,7 +1591,7 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
                     </motion.div>
                   </TooltipSimple>
                   <div className="w-px h-4 bg-border" />
-                  <TooltipSimple content="Scroll to bottom" side="top">
+                  <TooltipSimple content="Scroll to bottom" side="top" align="end" alignOffset={-18}>
                     <motion.div
                       whileTap={{ scale: 0.97 }}
                       transition={{ duration: 0.15 }}
