@@ -194,7 +194,17 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
 
   // Filter out messages that shouldn't be displayed
   const displayableMessages = useMemo(() => {
+    // Only these message types produce visible output in StreamMessage.
+    // Everything else (e.g. opcode-internal "last-prompt", "ai-title", "mode",
+    // "queue-operation", "attachment" records) renders as null and would
+    // otherwise leave empty placeholder rows that pile up as large gaps in the
+    // virtualized list.
+    const renderableTypes = ["assistant", "user", "result", "system", "summary"];
     return messages.filter((message, index) => {
+      if (!renderableTypes.includes(String(message.type))) {
+        return false;
+      }
+
       // Skip meta messages that don't have meaningful content
       if (message.isMeta && !message.leafUuid && !message.summary) {
         return false;
@@ -1239,22 +1249,22 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
           minHeight: '100px',
         }}
       >
-        <AnimatePresence>
-          {rowVirtualizer.getVirtualItems().map((virtualItem) => {
-            const message = displayableMessages[virtualItem.index];
-            return (
+        {rowVirtualizer.getVirtualItems().map((virtualItem) => {
+          const message = displayableMessages[virtualItem.index];
+          return (
+            <div
+              key={virtualItem.key}
+              data-index={virtualItem.index}
+              ref={rowVirtualizer.measureElement}
+              className="absolute inset-x-4 pb-4"
+              style={{
+                top: virtualItem.start,
+              }}
+            >
               <motion.div
-                key={virtualItem.key}
-                data-index={virtualItem.index}
-                ref={(el) => el && rowVirtualizer.measureElement(el)}
                 initial={{ opacity: 0, y: 8 }}
                 animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -8 }}
                 transition={{ duration: 0.3 }}
-                className="absolute inset-x-4 pb-4"
-                style={{
-                  top: virtualItem.start,
-                }}
               >
                 <StreamMessage 
                   message={message} 
@@ -1262,9 +1272,9 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
                   onLinkDetected={handleLinkDetected}
                 />
               </motion.div>
-            );
-          })}
-        </AnimatePresence>
+            </div>
+          );
+        })}
       </div>
 
       {/* Loading indicator under the latest message */}
