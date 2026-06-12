@@ -22,6 +22,7 @@ use commands::claude::{
     clear_checkpoint_manager, continue_claude_code, create_checkpoint, create_project,
     archive_session, delete_session, execute_claude_code, find_claude_md_files,
     fork_from_checkpoint, get_archived_sessions, open_devtools,
+    reveal_path_in_finder, get_session_jsonl_path,
     get_checkpoint_diff, get_checkpoint_settings, get_checkpoint_state_stats,
     get_claude_session_output, get_claude_settings, get_home_directory, get_hooks_config,
     get_project_sessions, get_recently_modified_files, get_session_name, get_session_timeline,
@@ -389,6 +390,8 @@ fn main() {
             // Proxy Settings
             get_proxy_settings,
             save_proxy_settings,
+            reveal_path_in_finder,
+            get_session_jsonl_path,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

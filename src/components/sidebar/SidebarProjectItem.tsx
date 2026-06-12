@@ -175,10 +175,37 @@ export const SidebarProjectItem: React.FC<SidebarProjectItemProps> = ({
         action: () => onNewSession(project.path),
       });
 
-      const menuItems: any[] = [newSessionItem];
+      const { PredefinedMenuItem } = await import('@tauri-apps/api/menu');
+      const sep1 = await PredefinedMenuItem.new({ item: 'Separator' });
+
+      const copyPathItem = await MenuItem.new({
+        id: 'copy-project-path',
+        text: 'Copy Project Path',
+        action: async () => {
+          try {
+            await navigator.clipboard.writeText(project.path);
+          } catch (_) {
+            const ta = document.createElement('textarea');
+            ta.value = project.path;
+            ta.style.position = 'fixed';
+            ta.style.opacity = '0';
+            document.body.appendChild(ta);
+            ta.select();
+            document.execCommand('copy');
+            document.body.removeChild(ta);
+          }
+        },
+      });
+
+      const revealItem = await MenuItem.new({
+        id: 'reveal-in-finder',
+        text: 'Reveal in Finder',
+        action: () => apiCall('reveal_path_in_finder', { path: project.path }),
+      });
+
+      const menuItems: any[] = [newSessionItem, sep1, copyPathItem, revealItem];
 
       if (import.meta.env.DEV) {
-        const { PredefinedMenuItem } = await import('@tauri-apps/api/menu');
         const sep = await PredefinedMenuItem.new({ item: 'Separator' });
         const inspectItem = await MenuItem.new({
           id: 'inspect-element',
@@ -272,6 +299,7 @@ export const SidebarProjectItem: React.FC<SidebarProjectItemProps> = ({
             <SidebarSessionItem
               key={session.id}
               session={session}
+              projectId={project.id}
               isActive={session.id === activeSessionId}
               isRunning={runningSessionIds ? runningSessionIds.has(session.id) : false}
               isArchived={archivedIds.has(session.id)}

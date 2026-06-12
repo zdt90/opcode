@@ -14,6 +14,7 @@ import type { Session } from '@/lib/api';
 
 interface SidebarSessionItemProps {
   session: Session;
+  projectId: string;
   isActive: boolean;
   isRunning?: boolean;
   isArchived?: boolean;
@@ -36,6 +37,7 @@ const RELATIVE_TIME_UPDATE_INTERVAL = 60_000;
 
 export const SidebarSessionItem: React.FC<SidebarSessionItemProps> = ({
   session,
+  projectId,
   isActive,
   isRunning = false,
   isArchived = false,
@@ -106,6 +108,22 @@ export const SidebarSessionItem: React.FC<SidebarSessionItemProps> = ({
         },
       });
 
+      const revealJsonlItem = await MenuItem.new({
+        id: 'reveal-jsonl-in-finder',
+        text: 'Reveal JSONL in Finder',
+        action: async () => {
+          try {
+            const jsonlPath = await apiCall<string>('get_session_jsonl_path', {
+              projectId,
+              sessionId: session.id,
+            });
+            await apiCall('reveal_path_in_finder', { path: jsonlPath });
+          } catch (err) {
+            console.error('[SidebarSessionItem] Failed to reveal JSONL:', err);
+          }
+        },
+      });
+
       const sep1 = await PredefinedMenuItem.new({ item: 'Separator' });
 
       const renameItem = await MenuItem.new({
@@ -142,7 +160,7 @@ export const SidebarSessionItem: React.FC<SidebarSessionItemProps> = ({
         action: () => onRefreshSessions(),
       });
 
-      const menuItems: any[] = [openInNewTabItem, copyIdItem, sep1, renameItem, archiveItem, deleteItem, sep2, reloadItem];
+      const menuItems: any[] = [openInNewTabItem, copyIdItem, revealJsonlItem, sep1, renameItem, archiveItem, deleteItem, sep2, reloadItem];
 
       if (import.meta.env.DEV) {
         const inspectItem = await MenuItem.new({
