@@ -523,6 +523,7 @@ export function SessionOutputViewer({ session, onClose, className }: SessionOutp
                       {displayableMessages.map((message: ClaudeStreamMessage, index: number) => (
                         <motion.div
                           key={index}
+                          className="message-item"
                           initial={{ opacity: 0, y: 10 }}
                           animate={{ opacity: 1, y: 0 }}
                           transition={{ duration: 0.2 }}
@@ -647,6 +648,7 @@ export function SessionOutputViewer({ session, onClose, className }: SessionOutp
                     {displayableMessages.map((message: ClaudeStreamMessage, index: number) => (
                       <motion.div
                         key={index}
+                        className="message-item"
                         initial={{ opacity: 0, y: 10 }}
                         animate={{ opacity: 1, y: 0 }}
                         transition={{ duration: 0.2 }}

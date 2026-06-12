@@ -14,6 +14,7 @@ interface SidebarProps {
   onSessionSelect: (session: Session, projectPath: string, displayName: string) => void;
   onSessionOpenInNewTab: (session: Session, projectPath: string, displayName: string) => void;
   onNewSession: (projectPath: string, name?: string) => void;
+  onOpenProject?: () => void;
   activeSessionId?: string;
   isOpen: boolean;
   onToggle: () => void;
@@ -30,6 +31,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onSessionSelect,
   onSessionOpenInNewTab,
   onNewSession,
+  onOpenProject,
   activeSessionId,
   isOpen,
   onToggle,
@@ -124,16 +126,24 @@ export const Sidebar: React.FC<SidebarProps> = ({
       const { Menu, MenuItem } = await import('@tauri-apps/api/menu');
       const { LogicalPosition } = await import('@tauri-apps/api/dpi');
 
+      const openProjectItem = await MenuItem.new({
+        id: 'open-project',
+        text: 'Open Project…',
+        action: () => onOpenProject?.(),
+      });
+
+      const { PredefinedMenuItem } = await import('@tauri-apps/api/menu');
+      const sep1 = await PredefinedMenuItem.new({ item: 'Separator' });
+
       const refreshItem = await MenuItem.new({
         id: 'refresh-sessions',
         text: 'Refresh Sessions',
         action: () => loadProjects(),
       });
 
-      const menuItems: any[] = [refreshItem];
+      const menuItems: any[] = [openProjectItem, sep1, refreshItem];
 
       if (import.meta.env.DEV) {
-        const { PredefinedMenuItem } = await import('@tauri-apps/api/menu');
         const sep = await PredefinedMenuItem.new({ item: 'Separator' });
         const inspectItem = await MenuItem.new({
           id: 'inspect-element',

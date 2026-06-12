@@ -2534,6 +2534,67 @@ pub async fn open_devtools(window: tauri::WebviewWindow) -> Result<(), String> {
     Ok(())
 }
 
+/// Reveal a file or folder in the system file manager (Finder on macOS).
+/// On macOS, `open -R <path>` selects the item in Finder.
+/// Falls back to opening the parent directory when `-R` is not available.
+#[tauri::command]
+pub async fn reveal_path_in_finder(path: String) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        let status = std::process::Command::new("open")
+            .arg("-R")
+            .arg(&path)
+            .status()
+            .map_err(|e| format!("Failed to launch open: {}", e))?;
+        if !status.success() {
+            // Fallback: open the parent directory
+            if let Some(parent) = std::path::Path::new(&path).parent() {
+                std::process::Command::new("open")
+                    .arg(parent)
+                    .status()
+                    .map_err(|e| format!("Failed to open parent directory: {}", e))?;
+            }
+        }
+        Ok(())
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        // On Linux/Windows open the containing directory
+        let dir = std::path::Path::new(&path)
+            .parent()
+            .unwrap_or(std::path::Path::new(&path));
+        #[cfg(target_os = "windows")]
+        std::process::Command::new("explorer")
+            .arg(dir)
+            .spawn()
+            .map_err(|e| format!("Failed to open explorer: {}", e))?;
+        #[cfg(target_os = "linux")]
+        std::process::Command::new("xdg-open")
+            .arg(dir)
+            .spawn()
+            .map_err(|e| format!("Failed to open file manager: {}", e))?;
+        Ok(())
+    }
+}
+
+/// Return the absolute path to a session's JSONL file.
+/// The file lives at ~/.claude/projects/{project_id}/{session_id}.jsonl
+#[tauri::command]
+pub async fn get_session_jsonl_path(
+    project_id: String,
+    session_id: String,
+) -> Result<String, String> {
+    let claude_dir = get_claude_dir().map_err(|e| e.to_string())?;
+    let path = claude_dir
+        .join("projects")
+        .join(&project_id)
+        .join(format!("{}.jsonl", session_id));
+    if !path.exists() {
+        return Err(format!("JSONL file not found: {}", path.display()));
+    }
+    Ok(path.to_string_lossy().to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

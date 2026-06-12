@@ -687,6 +687,7 @@ export function AgentRunOutputViewer({
                   {displayableMessages.map((message: ClaudeStreamMessage, index: number) => (
                     <motion.div
                       key={index}
+                      className="message-item"
                       initial={{ opacity: 0, y: 10 }}
                       animate={{ opacity: 1, y: 0 }}
                       transition={{ duration: 0.2 }}
@@ -791,19 +792,20 @@ export function AgentRunOutputViewer({
               ) : (
                 <>
                   <AnimatePresence>
-                    {displayableMessages.map((message: ClaudeStreamMessage, index: number) => (
-                      <motion.div
-                        key={index}
-                        initial={{ opacity: 0, y: 10 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={{ duration: 0.2 }}
-                      >
-                        <ErrorBoundary>
-                          <StreamMessage message={message} streamMessages={messages} />
-                        </ErrorBoundary>
-                      </motion.div>
-                    ))}
-                  </AnimatePresence>
+                  {displayableMessages.map((message: ClaudeStreamMessage, index: number) => (
+                    <motion.div
+                      key={index}
+                      className="message-item"
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ duration: 0.2 }}
+                    >
+                      <ErrorBoundary>
+                        <StreamMessage message={message} streamMessages={messages} />
+                      </ErrorBoundary>
+                    </motion.div>
+                  ))}
+                </AnimatePresence>
                   <div ref={fullscreenMessagesEndRef} />
                 </>
               )}
