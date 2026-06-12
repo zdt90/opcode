@@ -87,6 +87,25 @@ export const SidebarSessionItem: React.FC<SidebarSessionItemProps> = ({
         action: () => onOpenInNewTab(),
       });
 
+      const copyIdItem = await MenuItem.new({
+        id: 'copy-session-id',
+        text: 'Copy Session ID',
+        action: async () => {
+          try {
+            await navigator.clipboard.writeText(session.id);
+          } catch (_) {
+            const ta = document.createElement('textarea');
+            ta.value = session.id;
+            ta.style.position = 'fixed';
+            ta.style.opacity = '0';
+            document.body.appendChild(ta);
+            ta.select();
+            document.execCommand('copy');
+            document.body.removeChild(ta);
+          }
+        },
+      });
+
       const sep1 = await PredefinedMenuItem.new({ item: 'Separator' });
 
       const renameItem = await MenuItem.new({
@@ -123,7 +142,7 @@ export const SidebarSessionItem: React.FC<SidebarSessionItemProps> = ({
         action: () => onRefreshSessions(),
       });
 
-      const menuItems: any[] = [openInNewTabItem, sep1, renameItem, archiveItem, deleteItem, sep2, reloadItem];
+      const menuItems: any[] = [openInNewTabItem, copyIdItem, sep1, renameItem, archiveItem, deleteItem, sep2, reloadItem];
 
       if (import.meta.env.DEV) {
         const inspectItem = await MenuItem.new({

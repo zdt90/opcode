@@ -270,8 +270,13 @@ const StreamMessageComponent: React.FC<StreamMessageProps> = ({ message, classNa
   };
   
   try {
-    // Skip rendering for meta messages that don't have meaningful content
-    if (message.isMeta && !message.leafUuid && !message.summary) {
+    // Skip all isMeta messages except compact summaries (which carry a
+    // `summary` field and are intentionally rendered as Context Summary cards
+    // further below).  This acts as a catch-all last line of defence so that
+    // skill injections, plugin context, and other synthetic user turns never
+    // surface as real user bubbles, regardless of whether the upstream
+    // displayableMessages filter already handled them.
+    if (message.isMeta && !message.summary) {
       return null;
     }
 

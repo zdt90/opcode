@@ -217,7 +217,7 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
       }
 
       // Skip meta messages that don't have meaningful content
-      if (message.isMeta && !message.leafUuid && !message.summary) {
+      if (message.isMeta && !message.summary) {
         return false;
       }
 
