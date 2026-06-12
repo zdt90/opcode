@@ -930,10 +930,41 @@ pub async fn load_session_history(
     Ok(messages)
 }
 
+/// Read the skip_permissions setting from app_settings.
+/// Defaults to true (match the previous hard-coded behaviour) when the row
+/// is absent or unreadable.
+fn read_skip_permissions(db: &crate::commands::agents::AgentDb) -> bool {
+    let conn = db.0.lock().unwrap();
+    conn.query_row(
+        "SELECT value FROM app_settings WHERE key = 'skip_permissions'",
+        [],
+        |row| row.get::<_, String>(0),
+    )
+    .map(|v| v != "false")
+    .unwrap_or(true)
+}
+
+/// Build the common permission flags for a Claude CLI invocation.
+/// When `skip` is true we use both --dangerously-skip-permissions (skips
+/// built-in tool checks) and --permission-mode bypassPermissions (skips MCP
+/// tool permission prompts that are not covered by the former flag).
+fn permission_args(skip: bool) -> Vec<String> {
+    if skip {
+        vec![
+            "--dangerously-skip-permissions".to_string(),
+            "--permission-mode".to_string(),
+            "bypassPermissions".to_string(),
+        ]
+    } else {
+        vec![]
+    }
+}
+
 /// Execute a new interactive Claude Code session with streaming output
 #[tauri::command]
 pub async fn execute_claude_code(
     app: AppHandle,
+    db: tauri::State<'_, crate::commands::agents::AgentDb>,
     project_path: String,
     prompt: String,
     model: String,
@@ -944,9 +975,10 @@ pub async fn execute_claude_code(
         model
     );
 
+    let skip = read_skip_permissions(&db);
     let claude_path = find_claude_binary(&app)?;
 
-    let args = vec![
+    let mut args = vec![
         "--print".to_string(),
         "--model".to_string(),
         model.clone(),
@@ -955,8 +987,8 @@ pub async fn execute_claude_code(
         "--input-format".to_string(),
         "stream-json".to_string(),
         "--verbose".to_string(),
-        "--dangerously-skip-permissions".to_string(),
     ];
+    args.extend(permission_args(skip));
 
     let cmd = create_system_command(&claude_path, args, &project_path);
     spawn_claude_process(app, cmd, prompt, model, project_path).await
@@ -966,6 +998,7 @@ pub async fn execute_claude_code(
 #[tauri::command]
 pub async fn continue_claude_code(
     app: AppHandle,
+    db: tauri::State<'_, crate::commands::agents::AgentDb>,
     project_path: String,
     prompt: String,
     model: String,
@@ -976,9 +1009,10 @@ pub async fn continue_claude_code(
         model
     );
 
+    let skip = read_skip_permissions(&db);
     let claude_path = find_claude_binary(&app)?;
 
-    let args = vec![
+    let mut args = vec![
         "-c".to_string(), // Continue flag
         "--print".to_string(),
         "--model".to_string(),
@@ -988,8 +1022,8 @@ pub async fn continue_claude_code(
         "--input-format".to_string(),
         "stream-json".to_string(),
         "--verbose".to_string(),
-        "--dangerously-skip-permissions".to_string(),
     ];
+    args.extend(permission_args(skip));
 
     let cmd = create_system_command(&claude_path, args, &project_path);
     spawn_claude_process(app, cmd, prompt, model, project_path).await
@@ -999,6 +1033,7 @@ pub async fn continue_claude_code(
 #[tauri::command]
 pub async fn resume_claude_code(
     app: AppHandle,
+    db: tauri::State<'_, crate::commands::agents::AgentDb>,
     project_path: String,
     session_id: String,
     prompt: String,
@@ -1011,9 +1046,10 @@ pub async fn resume_claude_code(
         model
     );
 
+    let skip = read_skip_permissions(&db);
     let claude_path = find_claude_binary(&app)?;
 
-    let args = vec![
+    let mut args = vec![
         "--resume".to_string(),
         session_id.clone(),
         "--print".to_string(),
@@ -1024,8 +1060,8 @@ pub async fn resume_claude_code(
         "--input-format".to_string(),
         "stream-json".to_string(),
         "--verbose".to_string(),
-        "--dangerously-skip-permissions".to_string(),
     ];
+    args.extend(permission_args(skip));
 
     let cmd = create_system_command(&claude_path, args, &project_path);
     spawn_claude_process(app, cmd, prompt, model, project_path).await
