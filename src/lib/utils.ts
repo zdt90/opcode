@@ -1,3 +1,4 @@
+import type React from "react";
 import { type ClassValue, clsx } from "clsx";
 import { twMerge } from "tailwind-merge";
 
@@ -14,4 +15,24 @@ import { twMerge } from "tailwind-merge";
  */
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
-} 
+}
+
+/**
+ * MouseDown handler for message bubble wrappers.
+ * On triple-click the browser extends the selection well beyond the clicked
+ * element (into surrounding chrome). We intercept and confine the selection
+ * to the wrapper element instead.
+ *
+ * CSS `user-select: contain` would achieve the same thing but is only
+ * supported by Firefox, so we use a JS fallback for WebKit / Chromium.
+ */
+export function containSelectionOnTripleClick(e: React.MouseEvent): void {
+  if (e.detail < 3) return;
+  e.preventDefault();
+  const sel = window.getSelection();
+  if (!sel) return;
+  sel.removeAllRanges();
+  const range = document.createRange();
+  range.selectNodeContents(e.currentTarget as Node);
+  sel.addRange(range);
+}
