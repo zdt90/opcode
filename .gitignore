@@ -28,7 +28,8 @@ src-tauri/binaries/
 *.sw?
 temp_lib/
 
-.cursor/
+.cursor/*
+!.cursor/rules/
 AGENTS.md
 CLAUDE.md
 *_TASK.md

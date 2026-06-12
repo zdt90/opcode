@@ -29,6 +29,7 @@ import { SlashCommandsManager } from "./SlashCommandsManager";
 import { ProxySettings } from "./ProxySettings";
 import { useTheme, useTrackEvent } from "@/hooks";
 import { useUIScale } from "@/contexts/UIScaleContext";
+import { useInputBehavior } from "@/contexts/InputBehaviorContext";
 import { analytics } from "@/lib/analytics";
 import { TabPersistenceService } from "@/services/tabPersistence";
 
@@ -87,6 +88,9 @@ export const Settings: React.FC<SettingsProps> = ({
 
   // UI scale hook
   const { scale, setScale } = useUIScale();
+
+  // Input behavior
+  const { autoCorrect, setAutoCorrect } = useInputBehavior();
   
   // Proxy state
   const [proxySettingsChanged, setProxySettingsChanged] = useState(false);
@@ -793,6 +797,34 @@ export const Settings: React.FC<SettingsProps> = ({
                               type: 'success' 
                             });
                           } catch (e) {
+                            setToast({ message: 'Failed to update preference', type: 'error' });
+                          }
+                        }}
+                      />
+                    </div>
+
+                    {/* Auto-correction Toggle */}
+                    <div className="flex items-center justify-between">
+                      <div className="space-y-1">
+                        <Label htmlFor="input-autocorrect">Typing Auto-Correction</Label>
+                        <p className="text-caption text-muted-foreground">
+                          Let the OS auto-correct words while typing in the prompt bar
+                        </p>
+                      </div>
+                      <Switch
+                        id="input-autocorrect"
+                        checked={autoCorrect}
+                        onCheckedChange={async (checked) => {
+                          try {
+                            await setAutoCorrect(checked);
+                            trackEvent.settingsChanged('input_autocorrect', checked);
+                            setToast({
+                              message: checked
+                                ? 'Auto-correction enabled'
+                                : 'Auto-correction disabled',
+                              type: 'success',
+                            });
+                          } catch {
                             setToast({ message: 'Failed to update preference', type: 'error' });
                           }
                         }}

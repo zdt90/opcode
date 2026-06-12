@@ -21,6 +21,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { TooltipProvider, TooltipSimple, Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip-modern";
 import { FilePicker } from "./FilePicker";
 import { SlashCommandPicker } from "./SlashCommandPicker";
+import { useInputBehavior } from "@/contexts/InputBehaviorContext";
 import { ImagePreview } from "./ImagePreview";
 import { type FileEntry, type SlashCommand } from "@/lib/api";
 
@@ -239,11 +240,16 @@ const FloatingPromptInputInner = (
   const [embeddedImages, setEmbeddedImages] = useState<string[]>([]);
   const [dragActive, setDragActive] = useState(false);
 
+  const { autoCorrect } = useInputBehavior();
+
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const expandedTextareaRef = useRef<HTMLTextAreaElement>(null);
   const unlistenDragDropRef = useRef<(() => void) | null>(null);
   const [textareaHeight, setTextareaHeight] = useState<number>(48);
   const isIMEComposingRef = useRef(false);
+  // Cursor position at the moment composition starts, used to locate the
+  // segment that was inserted by the IME so we can strip embedded spaces.
+  const compositionStartPosRef = useRef(0);
 
   // Expose a method to add images programmatically
   React.useImperativeHandle(
@@ -669,13 +675,37 @@ const FloatingPromptInputInner = (
     }, 0);
   };
 
-  const handleCompositionStart = () => {
+  const handleCompositionStart = (e: React.CompositionEvent<HTMLTextAreaElement>) => {
     isIMEComposingRef.current = true;
+    compositionStartPosRef.current = e.currentTarget.selectionStart ?? 0;
   };
 
-  const handleCompositionEnd = () => {
+  const handleCompositionEnd = (e: React.CompositionEvent<HTMLTextAreaElement>) => {
+    // Capture synchronously — DOM node refs are stable across the async gap.
+    const composedData = e.data ?? '';
+    const textarea = e.currentTarget as HTMLTextAreaElement;
+    const startPos = compositionStartPosRef.current;
+
     setTimeout(() => {
       isIMEComposingRef.current = false;
+
+      // CJK IMEs (especially macOS pinyin) inject spaces inside the composition
+      // buffer to separate syllables, e.g. "ce s" for "测试". These spaces are
+      // committed verbatim when the user switches keyboards via CapsLock, or as
+      // a trailing space when confirming with the Space key. Strip all of them.
+      if (composedData.includes(' ') && textarea) {
+        // The composition segment spans [startPos, endPos) in the current value.
+        const endPos = textarea.selectionStart ?? startPos + composedData.length;
+        setPrompt(prev => {
+          const segment = prev.slice(startPos, endPos);
+          const clean = segment.replace(/ /g, '');
+          if (clean === segment) return prev;
+          requestAnimationFrame(() => {
+            textarea.setSelectionRange(startPos + clean.length, startPos + clean.length);
+          });
+          return prev.slice(0, startPos) + clean + prev.slice(endPos);
+        });
+      }
     }, 0);
   };
 
@@ -928,6 +958,9 @@ const FloatingPromptInputInner = (
                 placeholder="Type your message..."
                 className="min-h-[200px] resize-none"
                 disabled={disabled}
+                autoCorrect={autoCorrect ? "on" : "off"}
+                autoCapitalize={autoCorrect ? "on" : "off"}
+                spellCheck={autoCorrect}
                 onDragEnter={handleDrag}
                 onDragLeave={handleDrag}
                 onDragOver={handleDrag}
@@ -1264,6 +1297,9 @@ const FloatingPromptInputInner = (
                       : "Message Claude (@ for files, / for commands)..."
                   }
                   disabled={disabled}
+                  autoCorrect={autoCorrect ? "on" : "off"}
+                  autoCapitalize={autoCorrect ? "on" : "off"}
+                  spellCheck={autoCorrect}
                   className={cn(
                     "resize-none pr-20 pl-3 py-2.5 transition-all duration-150",
                     dragActive && "border-primary",
