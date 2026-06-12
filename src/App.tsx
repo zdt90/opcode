@@ -7,6 +7,7 @@ import { OutputCacheProvider } from "@/lib/outputCache";
 import { TabProvider } from "@/contexts/TabContext";
 import { ThemeProvider } from "@/contexts/ThemeContext";
 import { UIScaleProvider } from "@/contexts/UIScaleContext";
+import { InputBehaviorProvider } from "@/contexts/InputBehaviorContext";
 import { Card } from "@/components/ui/card";
 import { ProjectList } from "@/components/ProjectList";
 import { FilePicker } from "@/components/FilePicker";
@@ -566,12 +567,14 @@ function App() {
   return (
     <ThemeProvider>
       <UIScaleProvider>
-        <OutputCacheProvider>
-          <TabProvider>
-            <AppContent />
-            <StartupIntro visible={showIntro} />
-          </TabProvider>
-        </OutputCacheProvider>
+        <InputBehaviorProvider>
+          <OutputCacheProvider>
+            <TabProvider>
+              <AppContent />
+              <StartupIntro visible={showIntro} />
+            </TabProvider>
+          </OutputCacheProvider>
+        </InputBehaviorProvider>
       </UIScaleProvider>
     </ThemeProvider>
   );

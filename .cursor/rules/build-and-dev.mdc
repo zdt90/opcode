@@ -1,0 +1,43 @@
+---
+description: How to build the macOS DMG and how to run/test the app in dev (Vite + HMR)
+alwaysApply: false
+---
+
+# Building the macOS DMG
+
+To produce a distributable `.dmg` installer:
+
+```bash
+bun run build:dmg   # = tauri build --bundles dmg
+```
+
+- `beforeBuildCommand` runs `bun run build` (`tsc && vite build`) automatically.
+- This is a release build (Rust compiled in release mode) and can take several
+  minutes; run it in the background and check on it rather than blocking.
+- Output path (version/arch come from `package.json` + host CPU):
+
+```
+src-tauri/target/release/bundle/dmg/opcode_<version>_<arch>.dmg
+```
+
+  e.g. `src-tauri/target/release/bundle/dmg/opcode_0.2.1_aarch64.dmg` on Apple Silicon.
+
+# Running / testing in dev (with HMR)
+
+`tauri dev` is wired to run the Vite dev server (`beforeDevCommand: npm run dev`,
+`devUrl: http://localhost:1420`) instead of loading the prebuilt `dist/`:
+
+```bash
+bun run tauri dev
+```
+
+What this means when prompting the user to test:
+
+- **Frontend changes (`src/**`, TS/TSX/CSS) hot-reload instantly** — no manual
+  rebuild or app restart needed. Tell the user they can just save and look.
+- **Rust changes (`src-tauri/**`) require a restart** of `tauri dev` (Tauri
+  recompiles the backend), not just an HMR refresh.
+
+When you finish a frontend change, prompt the user to verify in their already-running
+`tauri dev` window (changes should appear immediately). Only ask them to restart
+`tauri dev` if you touched Rust code. Do not ask them to rebuild the DMG just to test.
