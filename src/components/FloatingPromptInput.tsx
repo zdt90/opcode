@@ -279,28 +279,39 @@ const FloatingPromptInputInner = (
     ref,
     () => ({
       addImage: (imagePath: string) => {
+        const target = isExpandedRef.current
+          ? expandedTextareaRef.current
+          : textareaRef.current;
+        const insertPos = target?.selectionStart ?? null;
+
         setPrompt(currentPrompt => {
           const existingPaths = extractImagePaths(currentPrompt);
           if (existingPaths.includes(imagePath)) {
             return currentPrompt; // Image already added
           }
 
-          // Wrap path in quotes if it contains spaces
           const mention = imagePath.includes(' ') ? `@"${imagePath}"` : `@${imagePath}`;
-          const newPrompt = currentPrompt + (currentPrompt.endsWith(' ') || currentPrompt === '' ? '' : ' ') + mention + ' ';
+          const pos = insertPos ?? currentPrompt.length;
+          const before = currentPrompt.substring(0, pos);
+          const after = currentPrompt.substring(pos);
+          const needsLeadingSpace = before.length > 0 && !before.endsWith(' ');
+          const insertText = (needsLeadingSpace ? ' ' : '') + mention + ' ';
+          const newPrompt = before + insertText + after;
+          const newCursorPos = pos + insertText.length;
 
-          // Focus the textarea
           setTimeout(() => {
-            const target = isExpanded ? expandedTextareaRef.current : textareaRef.current;
-            target?.focus();
-            target?.setSelectionRange(newPrompt.length, newPrompt.length);
+            const t = isExpandedRef.current
+              ? expandedTextareaRef.current
+              : textareaRef.current;
+            t?.focus();
+            t?.setSelectionRange(newCursorPos, newCursorPos);
           }, 0);
 
           return newPrompt;
         });
       }
     }),
-    [isExpanded]
+    [] // isExpandedRef is a stable ref, no deps needed
   );
 
   // Helper function to check if a file is an image
@@ -845,6 +856,13 @@ const FloatingPromptInputInner = (
         const blob = item.getAsFile();
         if (!blob) continue;
 
+        // Capture the cursor position synchronously before the async FileReader
+        // callback runs and focus may have shifted.
+        const pasteTarget = isExpandedRef.current
+          ? expandedTextareaRef.current
+          : textareaRef.current;
+        const insertPos = pasteTarget?.selectionStart ?? null;
+
         try {
           const reader = new FileReader();
           reader.onload = async () => {
@@ -864,12 +882,22 @@ const FloatingPromptInputInner = (
               const mention = imagePath
                 ? (imagePath.includes(' ') ? `@"${imagePath}"` : `@${imagePath}`)
                 : `@"${dataUrl}"`;
-              const newPrompt = currentPrompt + (currentPrompt.endsWith(' ') || currentPrompt === '' ? '' : ' ') + mention + ' ';
-              
+
+              // Insert at the captured cursor position (or end if unavailable).
+              const pos = insertPos ?? currentPrompt.length;
+              const before = currentPrompt.substring(0, pos);
+              const after = currentPrompt.substring(pos);
+              const needsLeadingSpace = before.length > 0 && !before.endsWith(' ');
+              const insertText = (needsLeadingSpace ? ' ' : '') + mention + ' ';
+              const newPrompt = before + insertText + after;
+              const newCursorPos = pos + insertText.length;
+
               setTimeout(() => {
-                const target = isExpanded ? expandedTextareaRef.current : textareaRef.current;
+                const target = isExpandedRef.current
+                  ? expandedTextareaRef.current
+                  : textareaRef.current;
                 target?.focus();
-                target?.setSelectionRange(newPrompt.length, newPrompt.length);
+                target?.setSelectionRange(newCursorPos, newCursorPos);
               }, 0);
 
               return newPrompt;
