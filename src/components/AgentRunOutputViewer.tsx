@@ -23,6 +23,7 @@ import { useOutputCache } from '@/lib/outputCache';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { StreamMessage } from './StreamMessage';
 import { ErrorBoundary } from './ErrorBoundary';
+import { containSelectionOnTripleClick } from '@/lib/utils';
 import { formatISOTimestamp } from '@/lib/date-utils';
 import { AGENT_ICONS } from './CCAgents';
 import type { ClaudeStreamMessage } from './AgentExecution';
@@ -688,6 +689,7 @@ export function AgentRunOutputViewer({
                     <motion.div
                       key={index}
                       className="message-item"
+                      onMouseDown={containSelectionOnTripleClick}
                       initial={{ opacity: 0, y: 10 }}
                       animate={{ opacity: 1, y: 0 }}
                       transition={{ duration: 0.2 }}
@@ -796,6 +798,7 @@ export function AgentRunOutputViewer({
                     <motion.div
                       key={index}
                       className="message-item"
+                      onMouseDown={containSelectionOnTripleClick}
                       initial={{ opacity: 0, y: 10 }}
                       animate={{ opacity: 1, y: 0 }}
                       transition={{ duration: 0.2 }}

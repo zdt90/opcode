@@ -12,6 +12,7 @@ import type { AgentRun } from '@/lib/api';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { StreamMessage } from './StreamMessage';
 import { ErrorBoundary } from './ErrorBoundary';
+import { containSelectionOnTripleClick } from '@/lib/utils';
 
 interface SessionOutputViewerProps {
   session: AgentRun;
@@ -524,6 +525,7 @@ export function SessionOutputViewer({ session, onClose, className }: SessionOutp
                         <motion.div
                           key={index}
                           className="message-item"
+                          onMouseDown={containSelectionOnTripleClick}
                           initial={{ opacity: 0, y: 10 }}
                           animate={{ opacity: 1, y: 0 }}
                           transition={{ duration: 0.2 }}
@@ -649,6 +651,7 @@ export function SessionOutputViewer({ session, onClose, className }: SessionOutp
                       <motion.div
                         key={index}
                         className="message-item"
+                        onMouseDown={containSelectionOnTripleClick}
                         initial={{ opacity: 0, y: 10 }}
                         animate={{ opacity: 1, y: 0 }}
                         transition={{ duration: 0.2 }}

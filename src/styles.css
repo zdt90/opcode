@@ -983,10 +983,10 @@ code::-webkit-scrollbar-thumb:hover {
   animation: moveToInput 0.8s ease-in-out forwards;
 }
 
-/* Confine text selection (triple-click) to a single message bubble.
-   Without this, triple-clicking selects across surrounding UI chrome. */
+/* Isolate text selection to a single message bubble.
+   The JS triple-click handler on .message-item enforces the boundary;
+   this rule only provides fallback support on browsers that honour
+   user-select: contain (Firefox). */
 .message-item {
-  -webkit-user-select: contain;
   -moz-user-select: contain;
-  user-select: contain;
 }

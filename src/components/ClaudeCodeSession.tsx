@@ -17,7 +17,7 @@ import { Label } from "@/components/ui/label";
 import { Popover } from "@/components/ui/popover";
 import { api, type Session } from "@/lib/api";
 import { apiCall } from "@/lib/apiAdapter";
-import { cn } from "@/lib/utils";
+import { cn, containSelectionOnTripleClick } from "@/lib/utils";
 
 // Conditional imports for Tauri APIs
 import { listen as tauriListenImport } from "@tauri-apps/api/event";
@@ -1324,6 +1324,7 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
             >
               <motion.div
                 className="message-item"
+                onMouseDown={containSelectionOnTripleClick}
                 initial={{ opacity: 0, y: 8 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.3 }}
