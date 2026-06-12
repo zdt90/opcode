@@ -349,6 +349,7 @@ function AppContent() {
               <Sidebar
                 isOpen={showSidebar}
                 onToggle={() => setShowSidebar(false)}
+                onOpenProject={handleOpenProject}
                 onSessionSelect={(session: Session, projectPath: string, displayName: string) => {
                   window.dispatchEvent(
                     new CustomEvent('claude-session-selected', {
