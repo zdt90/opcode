@@ -331,7 +331,7 @@ export function SessionOutputViewer({ session, onClose, className }: SessionOutp
 
   const displayableMessages = useMemo(() => {
     return messages.filter((message, index) => {
-      if (message.isMeta && !message.leafUuid && !message.summary) return false;
+      if (message.isMeta && !message.summary) return false;
 
       if (message.type === "user" && message.message) {
         if (message.isMeta) return false;

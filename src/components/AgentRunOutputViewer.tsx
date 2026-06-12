@@ -466,7 +466,7 @@ export function AgentRunOutputViewer({
 
   const displayableMessages = useMemo(() => {
     return messages.filter((message) => {
-      if (message.isMeta && !message.leafUuid && !message.summary) return false;
+      if (message.isMeta && !message.summary) return false;
 
       if (message.type === "user" && message.message) {
         if (message.isMeta) return false;

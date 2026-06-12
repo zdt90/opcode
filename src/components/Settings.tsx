@@ -5,6 +5,7 @@ import {
   Trash2, 
   Save, 
   AlertCircle,
+  AlertTriangle,
   Loader2,
   Shield,
   Check,
@@ -104,6 +105,8 @@ export const Settings: React.FC<SettingsProps> = ({
   const [tabPersistenceEnabled, setTabPersistenceEnabled] = useState(true);
   // Startup intro preference
   const [startupIntroEnabled, setStartupIntroEnabled] = useState(true);
+  // Skip permission prompts (--dangerously-skip-permissions + --permission-mode bypassPermissions)
+  const [skipPermissions, setSkipPermissionsState] = useState(true);
   
   // Load settings on mount
   useEffect(() => {
@@ -116,6 +119,11 @@ export const Settings: React.FC<SettingsProps> = ({
     (async () => {
       const pref = await api.getSetting('startup_intro_enabled');
       setStartupIntroEnabled(pref === null ? true : pref === 'true');
+    })();
+    // Load skip_permissions setting (default to true to match previous hard-coded behaviour)
+    (async () => {
+      const pref = await api.getSetting('skip_permissions');
+      setSkipPermissionsState(pref === null ? true : pref !== 'false');
     })();
   }, []);
 
@@ -837,6 +845,41 @@ export const Settings: React.FC<SettingsProps> = ({
             
             {/* Permissions Settings */}
             <TabsContent value="permissions" className="space-y-6">
+              {/* Permission Settings */}
+              <Card className="p-6 border-orange-500/30">
+                <div className="space-y-4">
+                  <div className="flex items-center gap-2">
+                    <AlertTriangle className="h-4 w-4 text-orange-500" />
+                    <h3 className="text-heading-4">Permission Settings</h3>
+                  </div>
+                  <div className="flex items-start justify-between gap-4 rounded-lg border border-orange-500/20 bg-orange-500/5 p-4">
+                    <div className="space-y-1">
+                      <Label className="text-sm font-medium">
+                        Skip permission prompts (use with caution)
+                      </Label>
+                      <p className="text-xs text-orange-500/80">
+                        Equivalent to --dangerously-skip-permissions and --permission-mode bypassPermissions flags. Disabling this causes Claude to pause and wait for approval on MCP tool calls.
+                      </p>
+                    </div>
+                    <Switch
+                      checked={skipPermissions}
+                      onCheckedChange={async (checked) => {
+                        setSkipPermissionsState(checked);
+                        await api.saveSetting('skip_permissions', String(checked));
+                        setToast({
+                          message: checked
+                            ? "Permission prompts skipped — Claude will bypass all permission checks."
+                            : "Permission prompts enabled — Claude will ask before running MCP tools.",
+                          type: "success",
+                        });
+                        trackEvent.settingsChanged('skip_permissions', checked);
+                      }}
+                      className="mt-0.5 shrink-0 data-[state=checked]:bg-orange-500"
+                    />
+                  </div>
+                </div>
+              </Card>
+
               <Card className="p-6">
                 <div className="space-y-6">
                   <div>

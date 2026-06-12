@@ -110,6 +110,9 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
   isActive = true,
 }) => {
   const [projectPath] = useState(initialProjectPath || session?.project_path || "");
+  // Persist the input-bar draft so it survives tab switches and any accidental
+  // remounts of FloatingPromptInput.
+  const [draftPrompt, setDraftPrompt] = useState("");
   const [messages, setMessages] = useState<ClaudeStreamMessage[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -214,7 +217,7 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
       }
 
       // Skip meta messages that don't have meaningful content
-      if (message.isMeta && !message.leafUuid && !message.summary) {
+      if (message.isMeta && !message.summary) {
         return false;
       }
 
@@ -1640,6 +1643,8 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
               disabled={!projectPath}
               projectPath={projectPath}
               isActive={isActive}
+              initialPrompt={draftPrompt}
+              onDraftChange={setDraftPrompt}
               extraMenuItems={
                 <>
                   {effectiveSession && (
