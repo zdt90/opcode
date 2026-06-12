@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Send,
@@ -71,6 +71,15 @@ interface FloatingPromptInputProps {
    * insertions when multiple tabs are mounted simultaneously.
    */
   isActive?: boolean;
+  /**
+   * Pre-fill the input with this text on first mount (draft restoration).
+   */
+  initialPrompt?: string;
+  /**
+   * Called whenever the draft changes so the parent can persist it.
+   * Receives an empty string when the draft is cleared (e.g. after send).
+   */
+  onDraftChange?: (draft: string) => void;
 }
 
 export interface FloatingPromptInputRef {
@@ -223,10 +232,24 @@ const FloatingPromptInputInner = (
     onCancel,
     extraMenuItems,
     isActive = true,
+    initialPrompt = "",
+    onDraftChange,
   }: FloatingPromptInputProps,
   ref: React.Ref<FloatingPromptInputRef>,
 ) => {
-  const [prompt, setPrompt] = useState("");
+  const [prompt, setPromptRaw] = useState(initialPrompt);
+  const onDraftChangeRef = useRef(onDraftChange);
+  useEffect(() => { onDraftChangeRef.current = onDraftChange; }, [onDraftChange]);
+
+  // Wraps every setPrompt call so the parent always receives the latest draft.
+  const setPrompt = useCallback((value: string | ((prev: string) => string)) => {
+    setPromptRaw(prev => {
+      const next = typeof value === 'function' ? value(prev) : value;
+      onDraftChangeRef.current?.(next);
+      return next;
+    });
+  }, []);
+
   const [selectedModel, setSelectedModel] = useState<"sonnet" | "opus">(defaultModel);
   const [selectedThinkingMode, setSelectedThinkingMode] = useState<ThinkingMode>("auto");
   const [isExpanded, setIsExpanded] = useState(false);
@@ -365,9 +388,12 @@ const FloatingPromptInputInner = (
     }
   }, [prompt, projectPath, isExpanded]);
 
-  // Keep isActive accessible inside the stable drag-drop callback without re-registering
+  // Keep isActive / isExpanded accessible inside the stable drag-drop callback
+  // without re-registering the listener on every render.
   const isActiveRef = useRef(isActive);
   useEffect(() => { isActiveRef.current = isActive; }, [isActive]);
+  const isExpandedRef = useRef(isExpanded);
+  useEffect(() => { isExpandedRef.current = isExpanded; }, [isExpanded]);
 
   // Set up Tauri drag-drop event listener
   useEffect(() => {
@@ -429,13 +455,25 @@ const FloatingPromptInputInner = (
 
               if (mentionParts.length === 0) return currentPrompt;
 
+              // Insert at the cursor position rather than appending to the end.
+              // Read directly from the DOM so we get the live selectionStart even
+              // inside this setState-functional-updater closure.
+              const target = isExpandedRef.current
+                ? expandedTextareaRef.current
+                : textareaRef.current;
+              const insertPos = target?.selectionStart ?? currentPrompt.length;
+
+              const before = currentPrompt.substring(0, insertPos);
+              const after = currentPrompt.substring(insertPos);
               const mentionsToAdd = mentionParts.join(' ');
-              const newPrompt = currentPrompt + (currentPrompt.endsWith(' ') || currentPrompt === '' ? '' : ' ') + mentionsToAdd + ' ';
+              const needsLeadingSpace = before.length > 0 && !before.endsWith(' ');
+              const insertText = (needsLeadingSpace ? ' ' : '') + mentionsToAdd + ' ';
+              const newPrompt = before + insertText + after;
+              const newCursorPos = insertPos + insertText.length;
 
               setTimeout(() => {
-                const target = isExpanded ? expandedTextareaRef.current : textareaRef.current;
                 target?.focus();
-                target?.setSelectionRange(newPrompt.length, newPrompt.length);
+                target?.setSelectionRange(newCursorPos, newCursorPos);
               }, 0);
 
               return newPrompt;

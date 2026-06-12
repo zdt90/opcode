@@ -529,6 +529,39 @@ const StreamMessageComponent: React.FC<StreamMessageProps> = ({ message, classNa
       // Handle different message structures
       const msg = message.message || message;
 
+      // Sidechain messages are the human-turn prompts fed to sub-agents by the
+      // Task tool. They are not typed by the user; fold them into a compact card
+      // like claudecodeui's "Agent / Parameters" display.
+      const isSidechain =
+        (message as any).isSidechain === true || (msg as any)?.isSidechain === true;
+      if (isSidechain) {
+        const raw = msg.content;
+        const promptText =
+          typeof raw === "string"
+            ? raw
+            : Array.isArray(raw)
+            ? raw.map((c: any) => (typeof c === "string" ? c : c.text || "")).join("\n")
+            : String(raw ?? "");
+        if (!promptText.trim()) return null;
+        return (
+          <CollapsibleToolCard
+            memoryId={(message as any).uuid ? `agent-input:${(message as any).uuid}` : undefined}
+            label="Agent"
+            preview={truncatePreview(promptText)}
+            borderClass="border-l-purple-500 dark:border-l-purple-400"
+            valueClass="text-purple-600 dark:text-purple-400"
+            status="idle"
+            defaultExpanded={false}
+          >
+            <div className="prose prose-sm dark:prose-invert max-w-none">
+              <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents(syntaxTheme)}>
+                {promptText}
+              </ReactMarkdown>
+            </div>
+          </CollapsibleToolCard>
+        );
+      }
+
       // Claude stores compact/continuation summaries as synthetic "user" rows
       // flagged with isCompactSummary. They are really assistant-authored
       // context, so render them as a collapsible summary instead of a user
