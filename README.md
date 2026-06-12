@@ -25,6 +25,36 @@
 
 ---
 
+## ⚡ Build & Dev
+
+### Dev mode (Vite + HMR)
+
+```bash
+bun run tauri dev
+```
+
+- **Frontend changes** (`src/**`, TS/TSX/CSS) hot-reload instantly — no restart needed.
+- **Rust changes** (`src-tauri/**`) require restarting `tauri dev` to recompile the backend.
+
+### Build macOS DMG
+
+```bash
+bun run build:dmg   # = tauri build --bundles dmg
+```
+
+`beforeBuildCommand` runs `bun run build` (`tsc && vite build`) automatically.
+This is a release build and can take several minutes.
+
+Output path:
+
+```
+src-tauri/target/release/bundle/dmg/opcode_<version>_<arch>.dmg
+```
+
+e.g. `src-tauri/target/release/bundle/dmg/opcode_0.2.1_aarch64.dmg` on Apple Silicon.
+
+---
+
 <div align="center">
   <img src="src-tauri/icons/icon.png" alt="opcode Logo" width="120" height="120">
 
