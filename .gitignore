@@ -31,7 +31,6 @@ temp_lib/
 .cursor/*
 !.cursor/rules/
 AGENTS.md
-CLAUDE.md
 *_TASK.md
 TODO.md
 
