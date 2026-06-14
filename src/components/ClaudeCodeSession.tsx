@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from "react";
+import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { 
   Copy,
@@ -160,6 +160,16 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
   const [queuedPromptsCollapsed, setQueuedPromptsCollapsed] = useState(false);
 
   const parentRef = useRef<HTMLDivElement>(null);
+
+  // Smart auto-scroll: track whether the user is at (near) the bottom.
+  // Using a ref for the hot scroll-handler path + a state copy for UI rendering.
+  const isAtBottomRef = useRef(true);
+  const [isAtBottom, setIsAtBottom] = useState(true);
+  // How many new messages arrived while the user was scrolled up
+  const [unreadBelowCount, setUnreadBelowCount] = useState(0);
+  // Previous displayableMessages.length, so we know when truly new items arrive
+  const prevDisplayCountRef = useRef(0);
+
   const unlistenRefs = useRef<UnlistenFn[]>([]);
   const hasActiveSessionRef = useRef(false);
   const floatingPromptRef = useRef<FloatingPromptInputRef>(null);
@@ -391,25 +401,62 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
     onStreamingChange?.(isLoading, claudeSessionId);
   }, [isLoading, claudeSessionId, onStreamingChange]);
 
-  // Auto-scroll to bottom when new messages arrive
+  // Scroll-position listener: update isAtBottom when the user scrolls.
+  // 150 px from the bottom counts as "at bottom" to tolerate subpixel rounding
+  // and the brief overshoot that happens right after a programmatic smooth scroll.
   useEffect(() => {
-    if (displayableMessages.length > 0) {
-      // Use a more precise scrolling method to ensure content is fully visible
-      setTimeout(() => {
-        const scrollElement = parentRef.current;
-        if (scrollElement) {
-          // First, scroll using virtualizer to get close to the bottom
-          rowVirtualizer.scrollToIndex(displayableMessages.length - 1, { align: 'end', behavior: 'auto' });
+    const el = parentRef.current;
+    if (!el) return;
+    const THRESHOLD = 150;
+    const onScroll = () => {
+      const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight <= THRESHOLD;
+      if (atBottom !== isAtBottomRef.current) {
+        isAtBottomRef.current = atBottom;
+        setIsAtBottom(atBottom);
+      }
+      if (atBottom) setUnreadBelowCount(0);
+    };
+    el.addEventListener('scroll', onScroll, { passive: true });
+    return () => el.removeEventListener('scroll', onScroll);
+  }, []); // parentRef is stable, so mount-only is correct
 
-          // Then use direct scroll to ensure we reach the absolute bottom
-          requestAnimationFrame(() => {
-            scrollElement.scrollTo({
-              top: scrollElement.scrollHeight,
-              behavior: 'smooth'
-            });
-          });
-        }
+  // Helper: programmatically scroll to the very bottom, then mark "at bottom".
+  const scrollToBottom = useCallback((behavior: ScrollBehavior = 'smooth') => {
+    const el = parentRef.current;
+    if (!el) return;
+    // Ask the virtualizer to render the last item before we scroll there
+    rowVirtualizer.scrollToIndex(displayableMessages.length - 1, { align: 'end', behavior: 'auto' });
+    requestAnimationFrame(() => {
+      el.scrollTo({ top: el.scrollHeight, behavior });
+    });
+    isAtBottomRef.current = true;
+    setIsAtBottom(true);
+    setUnreadBelowCount(0);
+  }, [displayableMessages.length, rowVirtualizer]);
+
+  // Smart auto-scroll: follow new messages only when the user is already at bottom.
+  // If they've scrolled up, accumulate an "unread below" count and show a button instead.
+  useEffect(() => {
+    const n = displayableMessages.length;
+    if (n === 0) { prevDisplayCountRef.current = 0; return; }
+
+    const added = n - prevDisplayCountRef.current;
+    prevDisplayCountRef.current = n;
+
+    if (added <= 0) return; // length didn't increase (shouldn't happen, but guard anyway)
+
+    if (isAtBottomRef.current) {
+      setTimeout(() => {
+        const el = parentRef.current;
+        if (!el) return;
+        rowVirtualizer.scrollToIndex(n - 1, { align: 'end', behavior: 'auto' });
+        requestAnimationFrame(() => {
+          el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+        });
       }, 50);
+    } else {
+      // User is reading earlier content — don't interrupt; just count new arrivals
+      setUnreadBelowCount(c => c + added);
     }
   }, [displayableMessages.length, rowVirtualizer]);
 
@@ -458,18 +505,18 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
       // After loading history, we're continuing a conversation
       setIsFirstPrompt(false);
       
-      // Scroll to bottom after loading history
+      // Scroll to bottom after loading history (always; user just opened the session)
+      prevDisplayCountRef.current = 0; // let the auto-scroll effect re-fire after history loads
+      isAtBottomRef.current = true;
+      setIsAtBottom(true);
+      setUnreadBelowCount(0);
       setTimeout(() => {
         if (loadedMessages.length > 0) {
           const scrollElement = parentRef.current;
           if (scrollElement) {
-            // Use the same improved scrolling method
             rowVirtualizer.scrollToIndex(loadedMessages.length - 1, { align: 'end', behavior: 'auto' });
             requestAnimationFrame(() => {
-              scrollElement.scrollTo({
-                top: scrollElement.scrollHeight,
-                behavior: 'auto'
-              });
+              scrollElement.scrollTo({ top: scrollElement.scrollHeight, behavior: 'auto' });
             });
           }
         }
@@ -582,6 +629,11 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
       setError("Please select a project directory first");
       return;
     }
+
+    // Always scroll to bottom when the user sends a message — they want to see the reply.
+    isAtBottomRef.current = true;
+    setIsAtBottom(true);
+    setUnreadBelowCount(0);
 
     // If already loading, inject mid-turn (matching Claude TUI behavior)
     if (isLoading) {
@@ -1571,6 +1623,30 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
             )}
           </AnimatePresence>
 
+          {/* "New messages below" scroll-to-bottom pill */}
+          <AnimatePresence>
+            {!isAtBottom && unreadBelowCount > 0 && (
+              <motion.button
+                key="new-messages-pill"
+                initial={{ opacity: 0, y: 8, scale: 0.95 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: 8, scale: 0.95 }}
+                transition={{ duration: 0.18 }}
+                onClick={() => scrollToBottom()}
+                className={cn(
+                  "fixed z-40 left-1/2 -translate-x-1/2",
+                  "flex items-center gap-1.5 px-3 py-1.5 rounded-full",
+                  "bg-primary text-primary-foreground text-xs font-medium shadow-lg",
+                  "hover:bg-primary/90 active:scale-95 transition-transform"
+                )}
+                style={{ bottom: `${inputBarHeight + 10}px` }}
+              >
+                <ChevronDown className="h-3.5 w-3.5" />
+                {unreadBelowCount === 1 ? '1 new message' : `${unreadBelowCount} new messages`}
+              </motion.button>
+            )}
+          </AnimatePresence>
+
           {/* Navigation Arrows - positioned above prompt bar with spacing */}
           {displayableMessages.length > 5 && (
             <motion.div
@@ -1663,24 +1739,7 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
                       <Button
                         variant="ghost"
                         size="sm"
-                        onClick={() => {
-                          // Use the improved scrolling method for manual scroll to bottom
-                          if (displayableMessages.length > 0) {
-                            const scrollElement = parentRef.current;
-                            if (scrollElement) {
-                              // First, scroll using virtualizer to get close to the bottom
-                              rowVirtualizer.scrollToIndex(displayableMessages.length - 1, { align: 'end', behavior: 'auto' });
-
-                              // Then use direct scroll to ensure we reach the absolute bottom
-                              requestAnimationFrame(() => {
-                                scrollElement.scrollTo({
-                                  top: scrollElement.scrollHeight,
-                                  behavior: 'smooth'
-                                });
-                              });
-                            }
-                          }
-                        }}
+                        onClick={() => scrollToBottom()}
                         className="px-3 py-2 hover:bg-accent rounded-none"
                       >
                         <ChevronsDown className="h-4 w-4" />
