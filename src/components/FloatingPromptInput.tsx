@@ -12,7 +12,8 @@ import {
   Lightbulb,
   Cpu,
   Rocket,
-  
+  AlertTriangle,
+  Database,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -24,6 +25,14 @@ import { SlashCommandPicker } from "./SlashCommandPicker";
 import { useInputBehavior } from "@/contexts/InputBehaviorContext";
 import { ImagePreview } from "./ImagePreview";
 import { type FileEntry, type SlashCommand } from "@/lib/api";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
 
 // Whether we're running inside the Tauri webview (vs plain browser/web mode).
 // NOTE: do NOT use `require(...)` here — in Vite's ESM bundle `require` is
@@ -36,7 +45,7 @@ interface FloatingPromptInputProps {
   /**
    * Callback when prompt is sent
    */
-  onSend: (prompt: string, model: "sonnet" | "opus") => void;
+  onSend: (prompt: string, model: ModelId, use1MContext: boolean) => void;
   /**
    * Whether the input is loading
    */
@@ -48,7 +57,7 @@ interface FloatingPromptInputProps {
   /**
    * Default model to select
    */
-  defaultModel?: "sonnet" | "opus";
+  defaultModel?: ModelId;
   /**
    * Project path for file picker
    */
@@ -80,6 +89,12 @@ interface FloatingPromptInputProps {
    * Receives an empty string when the draft is cleared (e.g. after send).
    */
   onDraftChange?: (draft: string) => void;
+  /**
+   * Called whenever the fixed input bar changes height (px), so the parent
+   * can update the message list's bottom padding to avoid content being
+   * hidden under the bar.
+   */
+  onHeightChange?: (height: number) => void;
 }
 
 export interface FloatingPromptInputRef {
@@ -182,32 +197,55 @@ const ThinkingModeIndicator: React.FC<{ level: number; color?: string }> = ({ le
   );
 };
 
+export type ModelId = "sonnet" | "opus" | "haiku" | "opus-4-7";
+
 type Model = {
-  id: "sonnet" | "opus";
+  id: ModelId;
+  /** The string actually passed to `--model`. Falls back to `id` if omitted. */
+  modelParam?: string;
   name: string;
   description: string;
   icon: React.ReactNode;
   shortName: string;
   color: string;
+  highCost?: boolean;
 };
 
 const MODELS: Model[] = [
   {
     id: "sonnet",
-    name: "Claude 4 Sonnet",
+    name: "Claude Sonnet 4.6",
     description: "Faster, efficient for most tasks",
     icon: <Zap className="h-3.5 w-3.5" />,
-    shortName: "S",
+    shortName: "S4.6",
     color: "text-primary"
   },
   {
     id: "opus",
-    name: "Claude 4 Opus",
+    name: "Claude Opus 4.6",
     description: "More capable, better for complex tasks",
-    icon: <Zap className="h-3.5 w-3.5" />,
-    shortName: "O",
+    icon: <Sparkles className="h-3.5 w-3.5" />,
+    shortName: "O4.6",
     color: "text-primary"
-  }
+  },
+  {
+    id: "haiku",
+    name: "Claude Haiku 4.5",
+    description: "Fastest and most compact model",
+    icon: <Zap className="h-3.5 w-3.5" />,
+    shortName: "H4.5",
+    color: "text-muted-foreground"
+  },
+  {
+    id: "opus-4-7",
+    modelParam: "global.anthropic.claude-opus-4-7",
+    name: "Claude Opus 4.7",
+    description: "Most powerful — significantly higher cost",
+    icon: <Rocket className="h-3.5 w-3.5" />,
+    shortName: "O4.7",
+    color: "text-amber-500",
+    highCost: true,
+  },
 ];
 
 /**
@@ -234,6 +272,7 @@ const FloatingPromptInputInner = (
     isActive = true,
     initialPrompt = "",
     onDraftChange,
+    onHeightChange,
   }: FloatingPromptInputProps,
   ref: React.Ref<FloatingPromptInputRef>,
 ) => {
@@ -250,8 +289,10 @@ const FloatingPromptInputInner = (
     });
   }, []);
 
-  const [selectedModel, setSelectedModel] = useState<"sonnet" | "opus">(defaultModel);
+  const [selectedModel, setSelectedModel] = useState<ModelId>(defaultModel ?? "sonnet");
   const [selectedThinkingMode, setSelectedThinkingMode] = useState<ThinkingMode>("auto");
+  const [use1MContext, setUse1MContext] = useState(false);
+  const [pendingHighCostAction, setPendingHighCostAction] = useState<null | "opus-4-7" | "1m-context">(null);
   const [isExpanded, setIsExpanded] = useState(false);
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
   const [thinkingModePickerOpen, setThinkingModePickerOpen] = useState(false);
@@ -269,6 +310,9 @@ const FloatingPromptInputInner = (
   const expandedTextareaRef = useRef<HTMLTextAreaElement>(null);
   const unlistenDragDropRef = useRef<(() => void) | null>(null);
   const [textareaHeight, setTextareaHeight] = useState<number>(48);
+  const barRootRef = useRef<HTMLDivElement>(null);
+  const onHeightChangeRef = useRef(onHeightChange);
+  useEffect(() => { onHeightChangeRef.current = onHeightChange; }, [onHeightChange]);
   const isIMEComposingRef = useRef(false);
   // Cursor position at the moment composition starts, used to locate the
   // segment that was inserted by the IME so we can strip embedded spaces.
@@ -393,7 +437,7 @@ const FloatingPromptInputInner = (
     if (textareaRef.current && !isExpanded) {
       textareaRef.current.style.height = 'auto';
       const scrollHeight = textareaRef.current.scrollHeight;
-      const newHeight = Math.min(Math.max(scrollHeight, 48), 240);
+      const newHeight = Math.min(Math.max(scrollHeight, 48), 160);
       setTextareaHeight(newHeight);
       textareaRef.current.style.height = `${newHeight}px`;
     }
@@ -405,6 +449,19 @@ const FloatingPromptInputInner = (
   useEffect(() => { isActiveRef.current = isActive; }, [isActive]);
   const isExpandedRef = useRef(isExpanded);
   useEffect(() => { isExpandedRef.current = isExpanded; }, [isExpanded]);
+
+  // Notify parent whenever the bar's total height changes so it can
+  // add matching bottom padding to the message list.
+  useEffect(() => {
+    const el = barRootRef.current;
+    if (!el) return;
+    const observer = new ResizeObserver((entries) => {
+      const h = entries[0]?.borderBoxSize?.[0]?.blockSize ?? entries[0]?.contentRect?.height ?? 0;
+      onHeightChangeRef.current?.(Math.ceil(h));
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
 
   // Set up Tauri drag-drop event listener
   useEffect(() => {
@@ -525,8 +582,8 @@ const FloatingPromptInputInner = (
       // Reset height to auto to get the actual scrollHeight
       textareaRef.current.style.height = 'auto';
       const scrollHeight = textareaRef.current.scrollHeight;
-      // Set min height to 48px and max to 240px (about 10 lines)
-      const newHeight = Math.min(Math.max(scrollHeight, 48), 240);
+      // Set min height to 48px and max to 160px (about 6 lines)
+      const newHeight = Math.min(Math.max(scrollHeight, 48), 160);
       setTextareaHeight(newHeight);
       textareaRef.current.style.height = `${newHeight}px`;
     }
@@ -801,7 +858,9 @@ const FloatingPromptInputInner = (
         finalPrompt = `${finalPrompt}.\n\n${thinkingMode.phrase}.`;
       }
 
-      onSend(finalPrompt, selectedModel);
+      const modelData = MODELS.find(m => m.id === selectedModel);
+      const modelParam = (modelData?.modelParam ?? selectedModel) as ModelId;
+      onSend(finalPrompt, modelParam, use1MContext);
       setPrompt("");
       setEmbeddedImages([]);
       setTextareaHeight(48); // Reset height after sending
@@ -965,9 +1024,62 @@ const FloatingPromptInputInner = (
 
   const selectedModelData = MODELS.find(m => m.id === selectedModel) || MODELS[0];
 
+  const handleModelSelect = (modelId: ModelId) => {
+    const model = MODELS.find(m => m.id === modelId);
+    if (model?.highCost) {
+      setPendingHighCostAction("opus-4-7");
+    } else {
+      setSelectedModel(modelId);
+      setModelPickerOpen(false);
+    }
+  };
+
+  const handle1MContextToggle = () => {
+    if (use1MContext) {
+      setUse1MContext(false);
+    } else {
+      setPendingHighCostAction("1m-context");
+    }
+  };
+
+  const confirmHighCostAction = () => {
+    if (pendingHighCostAction === "opus-4-7") {
+      setSelectedModel("opus-4-7");
+      setModelPickerOpen(false);
+    } else if (pendingHighCostAction === "1m-context") {
+      setUse1MContext(true);
+    }
+    setPendingHighCostAction(null);
+  };
+
   return (
     <TooltipProvider>
     <>
+      {/* High Cost Warning Dialog */}
+      <Dialog open={pendingHighCostAction !== null} onOpenChange={(open) => { if (!open) setPendingHighCostAction(null); }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <AlertTriangle className="h-5 w-5 text-amber-500" />
+              High Cost Warning
+            </DialogTitle>
+            <DialogDescription className="pt-1">
+              {pendingHighCostAction === "opus-4-7"
+                ? "Claude Opus 4.7 is significantly more expensive than Opus 4.6 without proportional benefit for most tasks. Are you sure you want to use it?"
+                : "The 1M extended context window increases cost substantially and is unnecessary for most use cases. Are you sure you want to enable it?"}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button variant="outline" onClick={() => setPendingHighCostAction(null)}>
+              Cancel
+            </Button>
+            <Button variant="destructive" onClick={confirmHighCostAction}>
+              Enable anyway
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* Expanded Modal */}
       <AnimatePresence>
         {isExpanded && (
@@ -1056,10 +1168,7 @@ const FloatingPromptInputInner = (
                           {MODELS.map((model) => (
                             <button
                               key={model.id}
-                              onClick={() => {
-                                setSelectedModel(model.id);
-                                setModelPickerOpen(false);
-                              }}
+                              onClick={() => handleModelSelect(model.id)}
                               className={cn(
                                 "w-full flex items-start gap-3 p-3 rounded-md transition-colors text-left",
                                 "hover:bg-accent",
@@ -1072,7 +1181,12 @@ const FloatingPromptInputInner = (
                                 </span>
                               </div>
                               <div className="flex-1 space-y-1">
-                                <div className="font-medium text-sm">{model.name}</div>
+                                <div className="flex items-center gap-2">
+                                  <span className="font-medium text-sm">{model.name}</span>
+                                  {model.highCost && (
+                                    <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-600 dark:text-amber-400">HIGH COST</span>
+                                  )}
+                                </div>
                                 <div className="text-xs text-muted-foreground">
                                   {model.description}
                                 </div>
@@ -1151,6 +1265,34 @@ const FloatingPromptInputInner = (
                       side="top"
                     />
                   </div>
+
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-muted-foreground">1M Context:</span>
+                    <TooltipSimple content={use1MContext ? "1M context enabled — high cost. Click to disable." : "Enable 1M extended context window (high cost)"} side="top">
+                      <button
+                        onClick={handle1MContextToggle}
+                        className={cn(
+                          "flex items-center gap-2 px-2.5 py-1.5 rounded-md border text-xs font-medium transition-all",
+                          use1MContext
+                            ? "border-amber-500/50 bg-amber-500/10 text-amber-600 dark:text-amber-400"
+                            : "border-border bg-background text-muted-foreground hover:border-border/80 hover:text-foreground"
+                        )}
+                      >
+                        <Database className="h-3.5 w-3.5" />
+                        <span>1M</span>
+                        {/* inline toggle switch */}
+                        <div className={cn(
+                          "w-7 h-4 rounded-full transition-colors flex items-center px-0.5",
+                          use1MContext ? "bg-amber-500" : "bg-muted-foreground/30"
+                        )}>
+                          <div className={cn(
+                            "w-3 h-3 rounded-full bg-white shadow-sm transition-transform duration-200",
+                            use1MContext ? "translate-x-3" : "translate-x-0"
+                          )} />
+                        </div>
+                      </button>
+                    </TooltipSimple>
+                  </div>
                 </div>
 
                 <div className="flex gap-1">
@@ -1188,6 +1330,7 @@ const FloatingPromptInputInner = (
 
       {/* Fixed Position Input Bar */}
       <div
+        ref={barRootRef}
         className={cn(
           "fixed bottom-0 left-0 right-0 z-40 bg-background/95 backdrop-blur-sm border-t border-border shadow-lg",
           dragActive && "ring-2 ring-primary ring-offset-2",
@@ -1247,10 +1390,7 @@ const FloatingPromptInputInner = (
                     {MODELS.map((model) => (
                       <button
                         key={model.id}
-                        onClick={() => {
-                          setSelectedModel(model.id);
-                          setModelPickerOpen(false);
-                        }}
+                        onClick={() => handleModelSelect(model.id)}
                         className={cn(
                           "w-full flex items-start gap-3 p-3 rounded-md transition-colors text-left",
                           "hover:bg-accent",
@@ -1263,7 +1403,12 @@ const FloatingPromptInputInner = (
                           </span>
                         </div>
                         <div className="flex-1 space-y-1">
-                          <div className="font-medium text-sm">{model.name}</div>
+                          <div className="flex items-center gap-2">
+                            <span className="font-medium text-sm">{model.name}</span>
+                            {model.highCost && (
+                              <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-600 dark:text-amber-400">HIGH COST</span>
+                            )}
+                          </div>
                           <div className="text-xs text-muted-foreground">
                             {model.description}
                           </div>
@@ -1345,6 +1490,37 @@ const FloatingPromptInputInner = (
                 side="top"
               />
 
+              <TooltipSimple
+                content={use1MContext ? "1M context enabled (high cost) — click to disable" : "Enable 1M extended context window (high cost)"}
+                side="top"
+              >
+                <motion.div whileTap={{ scale: 0.97 }} transition={{ duration: 0.15 }}>
+                  <button
+                    disabled={disabled}
+                    onClick={handle1MContextToggle}
+                    className={cn(
+                      "h-9 px-2 flex items-center gap-1.5 rounded-md transition-colors text-xs",
+                      use1MContext
+                        ? "text-amber-600 dark:text-amber-400"
+                        : "text-muted-foreground hover:text-foreground opacity-60 hover:opacity-100"
+                    )}
+                  >
+                    <Database className="h-3.5 w-3.5 shrink-0" />
+                    <span className="font-bold text-[10px]">1M</span>
+                    {/* mini toggle switch */}
+                    <div className={cn(
+                      "w-6 h-3.5 rounded-full transition-colors flex items-center px-0.5",
+                      use1MContext ? "bg-amber-500" : "bg-muted-foreground/30"
+                    )}>
+                      <div className={cn(
+                        "w-2.5 h-2.5 rounded-full bg-white shadow-sm transition-transform duration-200",
+                        use1MContext ? "translate-x-2.5" : "translate-x-0"
+                      )} />
+                    </div>
+                  </button>
+                </motion.div>
+              </TooltipSimple>
+
               </div>
 
               {/* Prompt Input - Center */}
@@ -1369,11 +1545,11 @@ const FloatingPromptInputInner = (
                   className={cn(
                     "resize-none pr-20 pl-3 py-2.5 transition-all duration-150",
                     dragActive && "border-primary",
-                    textareaHeight >= 240 && "overflow-y-auto scrollbar-thin"
+                    textareaHeight >= 160 && "overflow-y-auto scrollbar-thin"
                   )}
                   style={{
                     height: `${textareaHeight}px`,
-                    overflowY: textareaHeight >= 240 ? 'auto' : 'hidden'
+                    overflowY: textareaHeight >= 160 ? 'auto' : 'hidden'
                   }}
                 />
 
