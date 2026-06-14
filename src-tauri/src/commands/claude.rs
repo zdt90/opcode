@@ -960,6 +960,15 @@ fn permission_args(skip: bool) -> Vec<String> {
     }
 }
 
+/// Overrides the CLAUDE_CODE_DISABLE_1M_CONTEXT environment variable for a command.
+/// When use_1m_context is true the restriction is lifted (set to "0");
+/// when false the global settings.json value is left in effect (no override).
+fn apply_1m_context_env(cmd: &mut tokio::process::Command, use_1_m_context: bool) {
+    if use_1_m_context {
+        cmd.env("CLAUDE_CODE_DISABLE_1M_CONTEXT", "0");
+    }
+}
+
 /// Execute a new interactive Claude Code session with streaming output
 #[tauri::command]
 pub async fn execute_claude_code(
@@ -968,11 +977,13 @@ pub async fn execute_claude_code(
     project_path: String,
     prompt: String,
     model: String,
+    use_1_m_context: bool,
 ) -> Result<(), String> {
     log::info!(
-        "Starting new Claude Code session in: {} with model: {}",
+        "Starting new Claude Code session in: {} with model: {} (1M context: {})",
         project_path,
-        model
+        model,
+        use_1_m_context
     );
 
     let skip = read_skip_permissions(&db);
@@ -990,7 +1001,8 @@ pub async fn execute_claude_code(
     ];
     args.extend(permission_args(skip));
 
-    let cmd = create_system_command(&claude_path, args, &project_path);
+    let mut cmd = create_system_command(&claude_path, args, &project_path);
+    apply_1m_context_env(&mut cmd, use_1_m_context);
     spawn_claude_process(app, cmd, prompt, model, project_path).await
 }
 
@@ -1002,11 +1014,13 @@ pub async fn continue_claude_code(
     project_path: String,
     prompt: String,
     model: String,
+    use_1_m_context: bool,
 ) -> Result<(), String> {
     log::info!(
-        "Continuing Claude Code conversation in: {} with model: {}",
+        "Continuing Claude Code conversation in: {} with model: {} (1M context: {})",
         project_path,
-        model
+        model,
+        use_1_m_context
     );
 
     let skip = read_skip_permissions(&db);
@@ -1025,7 +1039,8 @@ pub async fn continue_claude_code(
     ];
     args.extend(permission_args(skip));
 
-    let cmd = create_system_command(&claude_path, args, &project_path);
+    let mut cmd = create_system_command(&claude_path, args, &project_path);
+    apply_1m_context_env(&mut cmd, use_1_m_context);
     spawn_claude_process(app, cmd, prompt, model, project_path).await
 }
 
@@ -1038,12 +1053,14 @@ pub async fn resume_claude_code(
     session_id: String,
     prompt: String,
     model: String,
+    use_1_m_context: bool,
 ) -> Result<(), String> {
     log::info!(
-        "Resuming Claude Code session: {} in: {} with model: {}",
+        "Resuming Claude Code session: {} in: {} with model: {} (1M context: {})",
         session_id,
         project_path,
-        model
+        model,
+        use_1_m_context
     );
 
     let skip = read_skip_permissions(&db);
@@ -1063,7 +1080,8 @@ pub async fn resume_claude_code(
     ];
     args.extend(permission_args(skip));
 
-    let cmd = create_system_command(&claude_path, args, &project_path);
+    let mut cmd = create_system_command(&claude_path, args, &project_path);
+    apply_1m_context_env(&mut cmd, use_1_m_context);
     spawn_claude_process(app, cmd, prompt, model, project_path).await
 }
 

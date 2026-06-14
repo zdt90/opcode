@@ -6,7 +6,7 @@ import { Label } from "@/components/ui/label";
 import { api, type Session } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { open } from "@tauri-apps/plugin-dialog";
-import { FloatingPromptInput, type FloatingPromptInputRef } from "./FloatingPromptInput";
+import { FloatingPromptInput, type FloatingPromptInputRef, type ModelId } from "./FloatingPromptInput";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { TimelineNavigator } from "./TimelineNavigator";
 import { CheckpointSettings } from "./CheckpointSettings";
@@ -51,7 +51,7 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
   const [showSlashCommandsSettings, setShowSlashCommandsSettings] = useState(false);
   const [forkCheckpointId, setForkCheckpointId] = useState<string | null>(null);
   const [forkSessionName, setForkSessionName] = useState("");
-  const [queuedPrompts, setQueuedPrompts] = useState<Array<{ id: string; prompt: string; model: "sonnet" | "opus" }>>([]);
+  const [queuedPrompts, setQueuedPrompts] = useState<Array<{ id: string; prompt: string; model: ModelId; use1MContext: boolean }>>([]);
   const [showPreview, setShowPreview] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [isPreviewMaximized, setIsPreviewMaximized] = useState(false);
@@ -106,7 +106,7 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
   };
 
   // Handle sending prompts
-  const handleSendPrompt = useCallback(async (prompt: string, model: "sonnet" | "opus") => {
+  const handleSendPrompt = useCallback(async (prompt: string, model: ModelId, use1MContext: boolean = false) => {
     console.log('[TRACE] handleSendPrompt called:');
     console.log('[TRACE]   prompt length:', prompt.length);
     console.log('[TRACE]   model:', model);
@@ -124,7 +124,7 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
     if (isStreaming) {
       console.log('[TRACE] Currently streaming - adding to queue');
       const id = Date.now().toString();
-      setQueuedPrompts(prev => [...prev, { id, prompt, model }]);
+      setQueuedPrompts(prev => [...prev, { id, prompt, model, use1MContext }]);
       return;
     }
 
@@ -134,12 +134,12 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
       
       if (isFirstPrompt) {
         console.log('[TRACE] First prompt - calling api.executeClaudeCode');
-        await api.executeClaudeCode(projectPath, prompt, model);
+        await api.executeClaudeCode(projectPath, prompt, model, use1MContext);
         setIsFirstPrompt(false);
         console.log('[TRACE] executeClaudeCode completed');
       } else if (claudeSessionId) {
         console.log('[TRACE] Continue prompt - calling api.continueClaudeCode');
-        await api.continueClaudeCode(projectPath, prompt, model);
+        await api.continueClaudeCode(projectPath, prompt, model, use1MContext);
         console.log('[TRACE] continueClaudeCode completed');
       } else {
         console.log('[TRACE] No claude session ID for continue');
@@ -157,7 +157,7 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
     const nextPrompt = queuedPrompts[0];
     setQueuedPrompts(prev => prev.slice(1));
     
-    await handleSendPrompt(nextPrompt.prompt, nextPrompt.model);
+    await handleSendPrompt(nextPrompt.prompt, nextPrompt.model, nextPrompt.use1MContext);
   }, [queuedPrompts, isStreaming, handleSendPrompt]);
 
   // Effect to process queue when streaming stops

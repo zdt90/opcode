@@ -16,6 +16,10 @@
 - **Collapsible tool cards** — compact, collapsible tool messages with colored accents.
 - **Prev/next user-message navigation** — floating pills to jump between user messages, with indigo-tinted user messages.
 - **Interface size scaling** — scale the whole UI (small / medium / large) from Settings, VSCode-style.
+- **Extended model selector** — switch between Sonnet 4.6, Opus 4.6, Haiku 4.5, and Opus 4.7 per-session from the prompt bar. Opus 4.7 requires a one-time high-cost confirmation before activating.
+- **1M context toggle** — enable the extended 1M-token context window on demand with a high-cost warning; the toggle lives in the prompt bar and overrides the global `CLAUDE_CODE_DISABLE_1M_CONTEXT` setting for that session only.
+- **Draft persistence** — unfinished prompt text is saved to `localStorage` and restored automatically when tabs or the app are reopened.
+- **Dynamic input-bar spacing** — the message list adjusts its bottom padding in real time as the prompt input grows, so no messages or buttons are ever hidden under the bar.
 
 ### 🐛 Fork Bugfixes
 
