@@ -1180,8 +1180,10 @@ export const Settings: React.FC<SettingsProps> = ({
           />
         )}
       </ToastContainer>
-      
-      
+
+      <p className="text-center text-[11px] text-muted-foreground/40 pb-4 select-text">
+        v{__APP_VERSION__} ({__GIT_COMMIT__})
+      </p>
     </div>
   );
 }; 

@@ -15,7 +15,7 @@
     "build:executables:windows": "bun run scripts/fetch-and-build.js windows --version=1.0.41",
     "preview": "vite preview",
     "tauri": "tauri",
-    "build:dmg": "tauri build --bundles dmg",
+    "build:dmg": "tauri build --bundles dmg && bun run scripts/rename-dmg.ts",
     "check": "tsc --noEmit && cd src-tauri && cargo check"
   },
   "dependencies": {

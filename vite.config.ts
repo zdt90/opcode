@@ -2,12 +2,27 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import { fileURLToPath, URL } from "node:url";
+import { execSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 
 const host = process.env.TAURI_DEV_HOST;
+
+const gitCommit = (() => {
+  try { return execSync("git rev-parse --short HEAD").toString().trim(); } catch { return "unknown"; }
+})();
+
+const appVersion = (() => {
+  try { return JSON.parse(readFileSync("package.json", "utf-8")).version as string; } catch { return "0.0.0"; }
+})();
 
 // https://vitejs.dev/config/
 export default defineConfig(async () => ({
   plugins: [react(), tailwindcss()],
+
+  define: {
+    __APP_VERSION__: JSON.stringify(appVersion),
+    __GIT_COMMIT__: JSON.stringify(gitCommit),
+  },
 
   // Path resolution
   resolve: {
