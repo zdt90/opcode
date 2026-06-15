@@ -59,6 +59,10 @@ interface FloatingPromptInputProps {
    */
   defaultModel?: ModelId;
   /**
+   * Called immediately when the user changes the model selection (before sending).
+   */
+  onModelChange?: (model: ModelId) => void;
+  /**
    * Project path for file picker
    */
   projectPath?: string;
@@ -273,12 +277,23 @@ const FloatingPromptInputInner = (
     initialPrompt = "",
     onDraftChange,
     onHeightChange,
+    onModelChange,
   }: FloatingPromptInputProps,
   ref: React.Ref<FloatingPromptInputRef>,
 ) => {
   const [prompt, setPromptRaw] = useState(initialPrompt);
   const onDraftChangeRef = useRef(onDraftChange);
   useEffect(() => { onDraftChangeRef.current = onDraftChange; }, [onDraftChange]);
+
+  // On mount, move the cursor to the end of any pre-filled draft.
+  useEffect(() => {
+    if (!initialPrompt) return;
+    const el = textareaRef.current;
+    if (el) {
+      const len = el.value.length;
+      el.setSelectionRange(len, len);
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Wraps every setPrompt call so the parent always receives the latest draft.
   const setPrompt = useCallback((value: string | ((prev: string) => string)) => {
@@ -319,6 +334,9 @@ const FloatingPromptInputInner = (
   const compositionStartPosRef = useRef(0);
 
   // Expose a method to add images programmatically
+  const onModelChangeRef = useRef(onModelChange);
+  useEffect(() => { onModelChangeRef.current = onModelChange; }, [onModelChange]);
+
   React.useImperativeHandle(
     ref,
     () => ({
@@ -442,6 +460,13 @@ const FloatingPromptInputInner = (
       textareaRef.current.style.height = `${newHeight}px`;
     }
   }, [prompt, projectPath, isExpanded]);
+
+  // Focus the textarea when this tab becomes active.
+  useEffect(() => {
+    if (!isActive) return;
+    const el = textareaRef.current;
+    if (el) el.focus();
+  }, [isActive]);
 
   // Keep isActive / isExpanded accessible inside the stable drag-drop callback
   // without re-registering the listener on every render.
@@ -1031,6 +1056,7 @@ const FloatingPromptInputInner = (
     } else {
       setSelectedModel(modelId);
       setModelPickerOpen(false);
+      onModelChangeRef.current?.(modelId);
     }
   };
 
@@ -1046,6 +1072,7 @@ const FloatingPromptInputInner = (
     if (pendingHighCostAction === "opus-4-7") {
       setSelectedModel("opus-4-7");
       setModelPickerOpen(false);
+      onModelChangeRef.current?.("opus-4-7");
     } else if (pendingHighCostAction === "1m-context") {
       setUse1MContext(true);
     }
