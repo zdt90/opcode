@@ -125,6 +125,23 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
   const [messages, setMessages] = useState<ClaudeStreamMessage[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [sessionExpired, setSessionExpired] = useState(false);
+
+  // Detect unrecoverable "session not found" errors from Claude CLI stderr.
+  // These happen when the API-side conversation context has expired or been
+  // compacted away, making --resume impossible regardless of what we do.
+  const handleClaudeError = (msg: string) => {
+    const isExpired =
+      msg.includes('No conversation found') ||
+      msg.includes('conversation not found') ||
+      msg.includes('session not found') ||
+      msg.includes('Session not found');
+    if (isExpired) {
+      setSessionExpired(true);
+    } else {
+      setError(msg);
+    }
+  };
   const [rawJsonlOutput, setRawJsonlOutput] = useState<string[]>([]);
   const [copyPopoverOpen, setCopyPopoverOpen] = useState(false);
   const [isFirstPrompt, setIsFirstPrompt] = useState(!session);
@@ -545,7 +562,7 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
     const errorUnlisten = await listen(`claude-error:${sessionId}`, (event: any) => {
       console.error("Claude error:", event.payload);
       if (isMountedRef.current) {
-        setError(event.payload);
+        handleClaudeError(event.payload);
       }
     });
 
@@ -645,7 +662,7 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
 
           const specificErrorUnlisten = await listen(`claude-error:${sid}`, (evt: any) => {
             console.error('Claude error (scoped):', evt.payload);
-            setError(evt.payload);
+            handleClaudeError(evt.payload);
           });
 
           const specificCompleteUnlisten = await listen(`claude-complete:${sid}`, (evt: any) => {
@@ -892,7 +909,7 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
 
         const genericErrorUnlisten = await listen('claude-error', (evt: any) => {
           console.error('Claude error:', evt.payload);
-          setError(evt.payload);
+          handleClaudeError(evt.payload);
         });
 
         const genericCompleteUnlisten = await listen('claude-complete', (evt: any) => {
@@ -1380,6 +1397,21 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
       )}
 
       {/* Error indicator */}
+      {sessionExpired && (
+        <motion.div
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.15 }}
+          className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-4 text-sm text-amber-700 dark:text-amber-400 mb-20 w-full max-w-6xl mx-auto"
+        >
+          <div className="font-semibold mb-1">This conversation can no longer be continued</div>
+          <div className="text-xs opacity-80">
+            The Claude session context has expired or been compacted away on the API side.
+            You can still read the conversation history above, but new messages cannot be sent.
+            Start a new session to continue working.
+          </div>
+        </motion.div>
+      )}
       {error && (
         <motion.div
           initial={{ opacity: 0, y: 8 }}
@@ -1669,7 +1701,7 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
               onSend={handleSendPrompt}
               onCancel={handleCancelExecution}
               isLoading={isLoading}
-              disabled={!projectPath}
+              disabled={!projectPath || sessionExpired}
               projectPath={projectPath}
               isActive={isActive}
               defaultModel={currentSessionModel}
