@@ -38,7 +38,7 @@ const TabPanel = React.memo(({ tab, isActive }: TabPanelProps) => {
   const prevStreamingRef = React.useRef(false);
   const sessionRevealedRef = React.useRef(false);
   const sessionPreRevealedRef = React.useRef(false);
-  const preRevealTimerRef = React.useRef<ReturnType<typeof window.setTimeout> | null>(null);
+  const preRevealTimerRef = React.useRef<number | null>(null);
   const isNewSessionRef = React.useRef(!tab.sessionId);
   const [projects, setProjects] = React.useState<Project[]>([]);
   const [selectedProject, setSelectedProject] = React.useState<Project | null>(null);
