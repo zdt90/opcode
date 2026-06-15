@@ -333,10 +333,10 @@ const FloatingPromptInputInner = (
   // segment that was inserted by the IME so we can strip embedded spaces.
   const compositionStartPosRef = useRef(0);
 
-  // Expose a method to add images programmatically
   const onModelChangeRef = useRef(onModelChange);
   useEffect(() => { onModelChangeRef.current = onModelChange; }, [onModelChange]);
 
+  // Expose a method to add images programmatically
   React.useImperativeHandle(
     ref,
     () => ({

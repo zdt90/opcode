@@ -354,7 +354,6 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
     });
   }, [projectPath, session, extractedSessionInfo, effectiveSession, messages.length, isLoading]);
 
-
   // Load session history if resuming
   useEffect(() => {
     if (session) {
