@@ -980,10 +980,15 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
 
         // Execute the appropriate command
         if (effectiveSession && !isFirstPrompt) {
-          console.log('[ClaudeCodeSession] Resuming session:', effectiveSession.id);
+          // Always use the session's own project_path for resume so that the
+          // correct cwd is passed to Claude even when the component's
+          // `projectPath` state is stale (e.g. the tab switched sessions, or
+          // the user has two tabs open on different projects).
+          const resumeProjectPath = effectiveSession.project_path || projectPath;
+          console.log('[ClaudeCodeSession] Resuming session:', effectiveSession.id, 'in:', resumeProjectPath);
           trackEvent.sessionResumed(effectiveSession.id);
           trackEvent.modelSelected(model);
-          await api.resumeClaudeCode(projectPath, effectiveSession.id, prompt, model, use1MContext);
+          await api.resumeClaudeCode(resumeProjectPath, effectiveSession.id, prompt, model, use1MContext);
         } else {
           console.log('[ClaudeCodeSession] Starting new session');
           setIsFirstPrompt(false);
