@@ -345,7 +345,7 @@ export const SidebarSessionItem: React.FC<SidebarSessionItemProps> = ({
             <span className="shrink-0 text-[10px] text-muted-foreground/60 leading-tight ml-auto">{relativeTime}</span>
           </div>
 
-          {isHovered && !isActive && (
+          {isHovered && (
             <div className="flex items-center gap-0.5 shrink-0">
               <button
                 onClick={handleRenameStart}

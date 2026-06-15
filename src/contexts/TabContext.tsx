@@ -165,23 +165,20 @@ export const TabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const removeTab = useCallback((id: string) => {
     setTabs(prevTabs => {
       const filteredTabs = prevTabs.filter(tab => tab.id !== id);
-      
-      // Reorder remaining tabs
-      const reorderedTabs = filteredTabs.map((tab, index) => ({
-        ...tab,
-        order: index
-      }));
 
       // Update active tab if necessary
-      if (activeTabId === id && reorderedTabs.length > 0) {
+      if (activeTabId === id && filteredTabs.length > 0) {
         const removedTabIndex = prevTabs.findIndex(tab => tab.id === id);
-        const newActiveIndex = Math.min(removedTabIndex, reorderedTabs.length - 1);
-        setActiveTabId(reorderedTabs[newActiveIndex].id);
-      } else if (reorderedTabs.length === 0) {
+        const newActiveIndex = Math.min(removedTabIndex, filteredTabs.length - 1);
+        setActiveTabId(filteredTabs[newActiveIndex].id);
+      } else if (filteredTabs.length === 0) {
         setActiveTabId(null);
       }
 
-      return reorderedTabs;
+      // Return filteredTabs directly — no spread, so unchanged tab objects keep
+      // their original reference. This lets React.memo on TabPanel skip
+      // re-renders when a sibling tab is closed.
+      return filteredTabs;
     });
   }, [activeTabId]);
 

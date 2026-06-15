@@ -29,7 +29,7 @@ interface TabPanelProps {
   isActive: boolean;
 }
 
-const TabPanel: React.FC<TabPanelProps> = ({ tab, isActive }) => {
+const TabPanel = React.memo(({ tab, isActive }: TabPanelProps) => {
   const { updateTab } = useTabState();
   // Guards binding a pending session name to its session id exactly once.
   const nameBoundRef = React.useRef(false);
@@ -37,6 +37,8 @@ const TabPanel: React.FC<TabPanelProps> = ({ tab, isActive }) => {
   // we reveal it in the sidebar once its first turn completes.
   const prevStreamingRef = React.useRef(false);
   const sessionRevealedRef = React.useRef(false);
+  const sessionPreRevealedRef = React.useRef(false);
+  const preRevealTimerRef = React.useRef<ReturnType<typeof window.setTimeout> | null>(null);
   const isNewSessionRef = React.useRef(!tab.sessionId);
   const [projects, setProjects] = React.useState<Project[]>([]);
   const [selectedProject, setSelectedProject] = React.useState<Project | null>(null);
@@ -48,6 +50,14 @@ const TabPanel: React.FC<TabPanelProps> = ({ tab, isActive }) => {
   const [error, setError] = React.useState<string | null>(null);
   
   // Load projects when tab becomes active and is of type 'projects'
+  useEffect(() => {
+    return () => {
+      if (preRevealTimerRef.current !== null) {
+        window.clearTimeout(preRevealTimerRef.current);
+      }
+    };
+  }, []);
+
   useEffect(() => {
     if (isActive && tab.type === 'projects') {
       loadProjects();
@@ -332,6 +342,18 @@ const TabPanel: React.FC<TabPanelProps> = ({ tab, isActive }) => {
                   if (!tab.sessionId) updateTab(tab.id, { sessionId });
                   window.dispatchEvent(new CustomEvent('opcode-refresh-sessions'));
                 }
+
+                // Pre-reveal: as soon as session ID is available (while still streaming),
+                // show the session in the sidebar immediately using first_message as
+                // display name — before the first turn completes.
+                if (isStreaming && sessionId && isNewSessionRef.current && !sessionPreRevealedRef.current) {
+                  sessionPreRevealedRef.current = true;
+                  // Small delay so Claude CLI has flushed the JSONL to disk.
+                  // Timer is stored on the ref so it can be cleared if the tab unmounts early.
+                  preRevealTimerRef.current = window.setTimeout(() => {
+                    window.dispatchEvent(new CustomEvent('opcode-refresh-sessions'));
+                  }, 800);
+                }
               }}
             />
           </div>
@@ -463,7 +485,7 @@ const TabPanel: React.FC<TabPanelProps> = ({ tab, isActive }) => {
 
     </>
   );
-};
+});
 
 export const TabContent: React.FC = () => {
   const { tabs, activeTabId, createChatTab, createProjectsTab, findTabBySessionId, createClaudeFileTab, createAgentExecutionTab, createCreateAgentTab, createImportAgentTab, closeTab, updateTab } = useTabState();
@@ -588,7 +610,7 @@ export const TabContent: React.FC = () => {
   
   return (
     <div className="flex-1 h-full relative">
-      <AnimatePresence mode="wait">
+      <AnimatePresence>
         {tabs.map((tab) => (
           <TabPanel
             key={tab.id}

@@ -212,6 +212,12 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
     return null;
   }, [session, extractedSessionInfo, projectPath]);
 
+  // Keep refs in sync for cleanup useEffect (avoid stale closures when effectiveSession changes mid-stream)
+  const effectiveSessionRef = useRef(effectiveSession);
+  const messagesRef = useRef(messages);
+  useEffect(() => { effectiveSessionRef.current = effectiveSession; }, [effectiveSession]);
+  useEffect(() => { messagesRef.current = messages; }, [messages]);
+
   // Filter out messages that shouldn't be displayed
   const displayableMessages = useMemo(() => {
     // Only these message types produce visible output in StreamMessage.
@@ -1252,7 +1258,12 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
     }
   };
 
-  // Cleanup event listeners and track mount state
+  // Cleanup event listeners and track mount state.
+  // IMPORTANT: deps array is intentionally [] so this cleanup only runs on true unmount,
+  // not on every effectiveSession change. Previously, having effectiveSession in deps caused
+  // all event listeners to be cancelled mid-stream whenever extractedSessionInfo was first
+  // set (e.g. on system:init), which made the second prompt freeze indefinitely.
+  // We use effectiveSessionRef / messagesRef to access up-to-date values at cleanup time.
   useEffect(() => {
     isMountedRef.current = true;
     
@@ -1260,16 +1271,19 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
       console.log('[ClaudeCodeSession] Component unmounting, cleaning up listeners');
       isMountedRef.current = false;
       isListeningRef.current = false;
+
+      const currentSession = effectiveSessionRef.current;
+      const currentMessages = messagesRef.current;
       
       // Track session completion with engagement metrics
-      if (effectiveSession) {
+      if (currentSession) {
         trackEvent.sessionCompleted();
         
         // Track session engagement
         const sessionDuration = sessionStartTime.current ? Date.now() - sessionStartTime.current : 0;
-        const messageCount = messages.filter(m => m.user_message).length;
+        const messageCount = currentMessages.filter(m => m.user_message).length;
         const toolsUsed = new Set<string>();
-        messages.forEach(msg => {
+        currentMessages.forEach(msg => {
           if (msg.type === 'assistant' && msg.message?.content) {
             const tools = msg.message.content.filter((c: any) => c.type === 'tool_use');
             tools.forEach((tool: any) => toolsUsed.add(tool.name));
@@ -1297,13 +1311,14 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
       unlistenRefs.current = [];
       
       // Clear checkpoint manager when session ends
-      if (effectiveSession) {
-        api.clearCheckpointManager(effectiveSession.id).catch(err => {
+      if (currentSession) {
+        api.clearCheckpointManager(currentSession.id).catch(err => {
           console.error("Failed to clear checkpoint manager:", err);
         });
       }
     };
-  }, [effectiveSession, projectPath]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const messagesList = (
     <div
