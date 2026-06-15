@@ -14,6 +14,7 @@ interface ProjectItem {
 interface SidebarProjectItemProps {
   project: ProjectItem;
   activeSessionId?: string;
+  activeProjectId?: string;
   runningSessionIds?: Set<string>;
   onSessionSelect: (session: Session, projectPath: string, displayName: string) => void;
   onSessionSelectNewTab: (session: Session, projectPath: string, displayName: string) => void;
@@ -32,6 +33,7 @@ function getProjectBaseName(path: string): string {
 export const SidebarProjectItem: React.FC<SidebarProjectItemProps> = ({
   project,
   activeSessionId,
+  activeProjectId,
   runningSessionIds,
   onSessionSelect,
   onSessionSelectNewTab,
@@ -80,6 +82,14 @@ export const SidebarProjectItem: React.FC<SidebarProjectItemProps> = ({
     if (e.key === 'Enter') { e.preventDefault(); handleCreateSessionCommit(); }
     else if (e.key === 'Escape') { e.preventDefault(); handleCreateSessionCancel(); }
   };
+
+  // Auto-expand and load sessions when this project becomes the active one.
+  useEffect(() => {
+    if (activeProjectId !== project.id) return;
+    if (!isExpanded) setIsExpanded(true);
+    if (!loaded) loadSessions();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeProjectId, project.id]);
 
   useEffect(() => {
     if (reloadSignal && reloadSignal > 0 && isExpanded) {

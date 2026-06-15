@@ -16,6 +16,7 @@ interface SidebarProps {
   onNewSession: (projectPath: string, name?: string) => void;
   onOpenProject?: () => void;
   activeSessionId?: string;
+  activeProjectId?: string;
   isOpen: boolean;
   onToggle: () => void;
   className?: string;
@@ -33,6 +34,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onNewSession,
   onOpenProject,
   activeSessionId,
+  activeProjectId,
   isOpen,
   onToggle,
   className,
@@ -237,6 +239,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   key={project.id}
                   project={project}
                   activeSessionId={activeSessionId}
+                  activeProjectId={activeProjectId}
                   runningSessionIds={runningSessionIds}
                   onSessionSelect={onSessionSelect}
                   onSessionSelectNewTab={onSessionOpenInNewTab}

@@ -51,7 +51,10 @@ type View =
  */
 function AppContent() {
   const [view, setView] = useState<View>("tabs");
-  const { createClaudeMdTab, createSettingsTab, createUsageTab, createMCPTab, createAgentsTab } = useTabState();
+  const { createClaudeMdTab, createSettingsTab, createUsageTab, createMCPTab, createAgentsTab, tabs, activeTabId } = useTabState();
+  const activeTab = tabs.find(t => t.id === activeTabId);
+  const activeSessionId = activeTab?.sessionId;
+  const activeProjectId = activeTab?.sessionData?.project_id as string | undefined;
   const [projects, setProjects] = useState<Project[]>([]);
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
   const [sessions, setSessions] = useState<Session[]>([]);
@@ -350,6 +353,8 @@ function AppContent() {
                 isOpen={showSidebar}
                 onToggle={() => setShowSidebar(false)}
                 onOpenProject={handleOpenProject}
+                activeSessionId={activeSessionId}
+                activeProjectId={activeProjectId}
                 onSessionSelect={(session: Session, projectPath: string, displayName: string) => {
                   window.dispatchEvent(
                     new CustomEvent('claude-session-selected', {
