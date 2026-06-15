@@ -46,6 +46,7 @@ const listen = tauriListenImport || ((eventName: string, callback: (event: any) 
 });
 import { StreamMessage } from "./StreamMessage";
 import { FloatingPromptInput, type FloatingPromptInputRef, type ModelId } from "./FloatingPromptInput";
+import { sessionModelStore } from "@/lib/sessionModelStore";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { TimelineNavigator } from "./TimelineNavigator";
 import { CheckpointSettings } from "./CheckpointSettings";
@@ -112,10 +113,14 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
   const [projectPath] = useState(initialProjectPath || session?.project_path || "");
   // Persist the input-bar draft so it survives tab switches and any accidental
   // remounts of FloatingPromptInput.
+  // Keyed by session so FloatingPromptInput remounts (and picks up fresh draft +
+  // model) whenever the user switches to a different session within the same tab.
+  const sessionKey = session?.id || 'new';
   const draftKey = `opcode-draft-${session?.id || projectPath || 'default'}`;
-  const [draftPrompt, setDraftPrompt] = useState<string>(() => {
-    try { return localStorage.getItem(draftKey) || ""; } catch { return ""; }
-  });
+  // Read directly from localStorage — no React state — so the value is always
+  // fresh when FloatingPromptInput mounts with the new session key.
+  const currentDraft = (() => { try { return localStorage.getItem(draftKey) || ""; } catch { return ""; } })();
+  const currentSessionModel = session?.id ? sessionModelStore.get(session.id) ?? undefined : undefined;
   const [inputBarHeight, setInputBarHeight] = useState(96);
   const [messages, setMessages] = useState<ClaudeStreamMessage[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -1644,6 +1649,7 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
             showTimeline && "sm:right-96"
           )}>
             <FloatingPromptInput
+              key={sessionKey}
               ref={floatingPromptRef}
               onSend={handleSendPrompt}
               onCancel={handleCancelExecution}
@@ -1651,9 +1657,13 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
               disabled={!projectPath}
               projectPath={projectPath}
               isActive={isActive}
-              initialPrompt={draftPrompt}
+              defaultModel={currentSessionModel}
+              onModelChange={(model) => {
+                const sessionId = effectiveSession?.id ?? claudeSessionId;
+                if (sessionId) sessionModelStore.set(sessionId, model);
+              }}
+              initialPrompt={currentDraft}
               onDraftChange={(draft) => {
-                setDraftPrompt(draft);
                 try {
                   if (draft) { localStorage.setItem(draftKey, draft); }
                   else { localStorage.removeItem(draftKey); }

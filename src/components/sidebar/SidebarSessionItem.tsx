@@ -226,11 +226,17 @@ export const SidebarSessionItem: React.FC<SidebarSessionItemProps> = ({
     setConfirmDeleteOpen(false);
     try {
       await apiCall('delete_session', { sessionId: session.id });
+      // Clean up any unsent draft saved for this session.
+      localStorage.removeItem(`opcode-draft-${session.id}`);
       onDelete(session.id);
     } catch (err) {
       console.error('[Sidebar] Failed to delete session:', err);
     }
   };
+
+  const pendingDraft = (() => {
+    try { return localStorage.getItem(`opcode-draft-${session.id}`)?.trim() || ""; } catch { return ""; }
+  })();
 
   return (
     <>
@@ -249,6 +255,17 @@ export const SidebarSessionItem: React.FC<SidebarSessionItemProps> = ({
             Archive keeps the session out of the active list while preserving its history.
           </p>
         </DialogHeader>
+        {pendingDraft && (
+          <div className="flex items-start gap-2 px-3 py-2 mt-2 rounded-md bg-amber-500/10 border border-amber-500/30 text-amber-600 dark:text-amber-500">
+            <AlertTriangle size={13} className="shrink-0 mt-0.5" />
+            <p className="text-xs leading-snug">
+              Unsent draft will be lost:{' '}
+              <span className="italic">
+                "{pendingDraft.length > 60 ? pendingDraft.slice(0, 60) + '…' : pendingDraft}"
+              </span>
+            </p>
+          </div>
+        )}
         <div className="flex flex-col gap-2 mt-2">
           <button
             onClick={handleArchiveConfirm}
