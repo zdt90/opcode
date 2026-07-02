@@ -25,6 +25,13 @@ type UnlistenFn = () => void;
 
 console.log('[ClaudeCodeSession] BUILD v7 - Tauri listen imported:', typeof tauriListenImport);
 
+// Module-level: only one ClaudeCodeSession may hold the generic (unscoped)
+// Tauri event listeners at a time. When a new session starts, the previous
+// generic listeners are cancelled to prevent messages from bleeding across tabs.
+// This mirrors the backend's single-process constraint: only one Claude process
+// runs at a time, so generic events always belong to the most recently started tab.
+let _cancelGenericListeners: (() => void) | null = null;
+
 // Web-compatible replacements
 const listen = tauriListenImport || ((eventName: string, callback: (event: any) => void) => {
   console.log('[ClaudeCodeSession] Setting up DOM event listener for:', eventName);
@@ -656,7 +663,20 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
           // Replace existing unlisten refs with these new ones (after cleaning up)
           unlistenRefs.current.forEach((u) => u());
           unlistenRefs.current = [specificOutputUnlisten, specificErrorUnlisten, specificCompleteUnlisten];
+
+          // Generic listeners have been replaced by scoped ones; release the
+          // module-level lock so the next tab's sendMessage can acquire it.
+          _cancelGenericListeners = null;
         };
+
+        // Cancel generic listeners from any other tab that may still be in the
+        // init phase. The backend only runs one process at a time, so the previous
+        // tab's generic listeners would only ever receive *our* messages going forward.
+        if (_cancelGenericListeners) {
+          console.log('[ClaudeCodeSession] Evicting stale generic listeners from a previous tab');
+          _cancelGenericListeners();
+          _cancelGenericListeners = null;
+        }
 
         // Generic listeners (catch-all)
         const genericOutputUnlisten = await listen('claude-output', async (event: any) => {
@@ -902,6 +922,14 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
 
         // Store the generic unlisteners for now; they may be replaced later.
         unlistenRefs.current = [genericOutputUnlisten, genericErrorUnlisten, genericCompleteUnlisten];
+
+        // Register the module-level cancellation hook so any subsequent tab's
+        // sendMessage can evict these listeners before registering its own.
+        _cancelGenericListeners = () => {
+          genericOutputUnlisten();
+          genericErrorUnlisten();
+          genericCompleteUnlisten();
+        };
 
         // --------------------------------------------------------------------
         // 2️⃣  Auto-checkpoint logic moved after listener setup (unchanged)
