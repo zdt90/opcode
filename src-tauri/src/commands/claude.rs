@@ -1347,7 +1347,7 @@ async fn spawn_claude_process(
         if let Some(mut existing_child) = current_process.take() {
             log::warn!("Killing existing Claude process before starting new one");
             let _ = existing_child.kill().await;
-            let _ = app_handle.emit("claude-process-killed", ());
+            let _ = app.emit("claude-process-killed", ());
         }
         *current_process = Some(child);
     }
