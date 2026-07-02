@@ -401,15 +401,29 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
     onStreamingChange?.(isLoading, claudeSessionId);
   }, [isLoading, claudeSessionId, onStreamingChange]);
 
+  // Flag set to true while WE are doing a programmatic smooth scroll.
+  // The scroll listener ignores intermediate positions during this window
+  // so it doesn't falsely detect "user scrolled away from bottom".
+  const isProgrammaticScrollRef = useRef(false);
+
   // Scroll-position listener: update isAtBottom when the user scrolls.
-  // 150 px from the bottom counts as "at bottom" to tolerate subpixel rounding
-  // and the brief overshoot that happens right after a programmatic smooth scroll.
+  // 150 px from the bottom counts as "at bottom" to tolerate subpixel rounding.
   useEffect(() => {
     const el = parentRef.current;
     if (!el) return;
     const THRESHOLD = 150;
     const onScroll = () => {
+      // While a programmatic smooth scroll is in flight, only ever CONFIRM
+      // "at bottom" — never set it to false from an intermediate position.
       const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight <= THRESHOLD;
+      if (isProgrammaticScrollRef.current) {
+        if (atBottom) {
+          isAtBottomRef.current = true;
+          setIsAtBottom(true);
+          setUnreadBelowCount(0);
+        }
+        return;
+      }
       if (atBottom !== isAtBottomRef.current) {
         isAtBottomRef.current = atBottom;
         setIsAtBottom(atBottom);
@@ -420,26 +434,40 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
     return () => el.removeEventListener('scroll', onScroll);
   }, []); // parentRef is stable, so mount-only is correct
 
-  // Helper: programmatically scroll to the very bottom, then mark "at bottom".
-  const scrollToBottom = useCallback((behavior: ScrollBehavior = 'smooth') => {
+  // Shared scroll-to-bottom implementation.
+  // `instant` = no animation (used for auto-follow during streaming).
+  // `smooth`  = animated (used for user-initiated jumps: pill, send, ↓↓ button).
+  const scrollToBottomImpl = useCallback((behavior: ScrollBehavior) => {
     const el = parentRef.current;
     if (!el) return;
     isAtBottomRef.current = true;
     setIsAtBottom(true);
     setUnreadBelowCount(0);
-    // scrollToIndex tells the virtualizer to render the last item.
-    // Two nested rAFs: first lets the virtualizer commit its DOM update,
-    // second reads the updated scrollHeight and scrolls to the true bottom.
     rowVirtualizer.scrollToIndex(displayableMessages.length - 1, { align: 'end', behavior: 'auto' });
+    // Double rAF: first lets the virtualizer commit its DOM update,
+    // second reads the updated scrollHeight and performs the final scroll.
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
-        el.scrollTo({ top: el.scrollHeight, behavior });
+        const latest = parentRef.current;
+        if (!latest) return;
+        if (behavior === 'smooth') {
+          isProgrammaticScrollRef.current = true;
+          latest.scrollTo({ top: latest.scrollHeight, behavior: 'smooth' });
+          // Clear the flag after a generous smooth-scroll budget (~400 ms).
+          setTimeout(() => { isProgrammaticScrollRef.current = false; }, 450);
+        } else {
+          latest.scrollTo({ top: latest.scrollHeight, behavior: 'auto' });
+        }
       });
     });
   }, [displayableMessages.length, rowVirtualizer]);
 
+  // Public helper used by pill, ↓↓ button, and send handler (smooth).
+  const scrollToBottom = useCallback(() => scrollToBottomImpl('smooth'), [scrollToBottomImpl]);
+
   // Smart auto-scroll: follow new messages only when the user is already at bottom.
-  // If they've scrolled up, accumulate an "unread below" count and show a button instead.
+  // Uses instant scroll so the animation doesn't produce intermediate positions
+  // that would falsely flip isAtBottomRef to false mid-stream.
   useEffect(() => {
     const n = displayableMessages.length;
     if (n === 0) { prevDisplayCountRef.current = 0; return; }
@@ -447,21 +475,22 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
     const added = n - prevDisplayCountRef.current;
     prevDisplayCountRef.current = n;
 
-    if (added <= 0) return; // length didn't increase (shouldn't happen, but guard anyway)
+    if (added <= 0) return;
 
     if (isAtBottomRef.current) {
       setTimeout(() => {
+        // Re-check: user might have scrolled away in the 50 ms window.
+        if (!isAtBottomRef.current) return;
         const el = parentRef.current;
         if (!el) return;
         rowVirtualizer.scrollToIndex(n - 1, { align: 'end', behavior: 'auto' });
         requestAnimationFrame(() => {
           requestAnimationFrame(() => {
-            el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+            parentRef.current?.scrollTo({ top: parentRef.current.scrollHeight, behavior: 'auto' });
           });
         });
       }, 50);
     } else {
-      // User is reading earlier content — don't interrupt; just count new arrivals
       setUnreadBelowCount(c => c + added);
     }
   }, [displayableMessages.length, rowVirtualizer]);
