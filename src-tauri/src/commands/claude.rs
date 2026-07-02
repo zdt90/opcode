@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::fs;
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
@@ -11,17 +12,18 @@ use tokio::io::AsyncWriteExt;
 use tokio::process::{Child, ChildStdin, Command};
 use tokio::sync::Mutex;
 
-/// Global state to track current Claude process and its stdin for mid-turn injection
+/// Per-tab Claude process state: each chat tab has its own Claude subprocess.
+/// Keyed by tab_id (the frontend Tab.id string).
 pub struct ClaudeProcessState {
-    pub current_process: Arc<Mutex<Option<Child>>>,
-    pub current_stdin: Arc<Mutex<Option<ChildStdin>>>,
+    pub processes: Arc<Mutex<HashMap<String, Child>>>,
+    pub stdins: Arc<Mutex<HashMap<String, ChildStdin>>>,
 }
 
 impl Default for ClaudeProcessState {
     fn default() -> Self {
         Self {
-            current_process: Arc::new(Mutex::new(None)),
-            current_stdin: Arc::new(Mutex::new(None)),
+            processes: Arc::new(Mutex::new(HashMap::new())),
+            stdins: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 }
@@ -996,16 +998,18 @@ fn apply_1m_context_env(cmd: &mut tokio::process::Command, use_1_m_context: bool
 pub async fn execute_claude_code(
     app: AppHandle,
     db: tauri::State<'_, crate::commands::agents::AgentDb>,
+    tab_id: String,
     project_path: String,
     prompt: String,
     model: String,
     use_1_m_context: bool,
 ) -> Result<(), String> {
     log::info!(
-        "Starting new Claude Code session in: {} with model: {} (1M context: {})",
+        "Starting new Claude Code session in: {} with model: {} (1M context: {}, tab: {})",
         project_path,
         model,
-        use_1_m_context
+        use_1_m_context,
+        tab_id
     );
 
     let skip = read_skip_permissions(&db);
@@ -1025,7 +1029,7 @@ pub async fn execute_claude_code(
 
     let mut cmd = create_system_command(&claude_path, args, &project_path);
     apply_1m_context_env(&mut cmd, use_1_m_context);
-    spawn_claude_process(app, cmd, prompt, model, project_path).await
+    spawn_claude_process(app, cmd, tab_id, prompt, model, project_path).await
 }
 
 /// Continue an existing Claude Code conversation with streaming output
@@ -1033,16 +1037,18 @@ pub async fn execute_claude_code(
 pub async fn continue_claude_code(
     app: AppHandle,
     db: tauri::State<'_, crate::commands::agents::AgentDb>,
+    tab_id: String,
     project_path: String,
     prompt: String,
     model: String,
     use_1_m_context: bool,
 ) -> Result<(), String> {
     log::info!(
-        "Continuing Claude Code conversation in: {} with model: {} (1M context: {})",
+        "Continuing Claude Code conversation in: {} with model: {} (1M context: {}, tab: {})",
         project_path,
         model,
-        use_1_m_context
+        use_1_m_context,
+        tab_id
     );
 
     let skip = read_skip_permissions(&db);
@@ -1063,7 +1069,7 @@ pub async fn continue_claude_code(
 
     let mut cmd = create_system_command(&claude_path, args, &project_path);
     apply_1m_context_env(&mut cmd, use_1_m_context);
-    spawn_claude_process(app, cmd, prompt, model, project_path).await
+    spawn_claude_process(app, cmd, tab_id, prompt, model, project_path).await
 }
 
 /// Resume an existing Claude Code session by ID with streaming output
@@ -1071,6 +1077,7 @@ pub async fn continue_claude_code(
 pub async fn resume_claude_code(
     app: AppHandle,
     db: tauri::State<'_, crate::commands::agents::AgentDb>,
+    tab_id: String,
     project_path: String,
     session_id: String,
     prompt: String,
@@ -1078,11 +1085,12 @@ pub async fn resume_claude_code(
     use_1_m_context: bool,
 ) -> Result<(), String> {
     log::info!(
-        "Resuming Claude Code session: {} in: {} with model: {} (1M context: {})",
+        "Resuming Claude Code session: {} in: {} with model: {} (1M context: {}, tab: {})",
         session_id,
         project_path,
         model,
-        use_1_m_context
+        use_1_m_context,
+        tab_id
     );
 
     let skip = read_skip_permissions(&db);
@@ -1104,7 +1112,7 @@ pub async fn resume_claude_code(
 
     let mut cmd = create_system_command(&claude_path, args, &project_path);
     apply_1m_context_env(&mut cmd, use_1_m_context);
-    spawn_claude_process(app, cmd, prompt, model, project_path).await
+    spawn_claude_process(app, cmd, tab_id, prompt, model, project_path).await
 }
 
 /// Inject a message into the currently running Claude process stdin (mid-turn injection)
@@ -1112,14 +1120,15 @@ pub async fn resume_claude_code(
 #[tauri::command]
 pub async fn inject_claude_message(
     app: AppHandle,
+    tab_id: String,
     message: String,
 ) -> Result<(), String> {
-    log::info!("Injecting mid-turn message: {}", message);
+    log::info!("Injecting mid-turn message into tab {}: {}", tab_id, message);
 
     let claude_state = app.state::<ClaudeProcessState>();
-    let mut stdin_guard = claude_state.current_stdin.lock().await;
+    let mut stdins = claude_state.stdins.lock().await;
 
-    if let Some(ref mut stdin) = *stdin_guard {
+    if let Some(ref mut stdin) = stdins.get_mut(&tab_id) {
         // Claude's stream-json input format expects a JSON object per line.
         // Use the same content shape as the initial prompt (an array of typed
         // content blocks) so both code paths produce identical message structure.
@@ -1142,10 +1151,10 @@ pub async fn inject_claude_message(
             .flush()
             .await
             .map_err(|e| format!("Failed to flush Claude stdin: {}", e))?;
-        log::info!("Mid-turn message injected successfully");
+        log::info!("Mid-turn message injected successfully into tab {}", tab_id);
         Ok(())
     } else {
-        Err("No active Claude process to inject message into".to_string())
+        Err(format!("No active Claude process for tab {}", tab_id))
     }
 }
 
@@ -1198,55 +1207,49 @@ pub async fn cancel_claude_execution(
         }
     }
 
-    // Method 2: Try the legacy approach via ClaudeProcessState
+    // Method 2: Fall back to killing all processes in ClaudeProcessState
     if !killed {
         let claude_state = app.state::<ClaudeProcessState>();
-        let mut current_process = claude_state.current_process.lock().await;
+        let mut processes = claude_state.processes.lock().await;
 
-        if let Some(mut child) = current_process.take() {
-            // Try to get the PID before killing
-            let pid = child.id();
-            log::info!(
-                "Attempting to kill Claude process via ClaudeProcessState with PID: {:?}",
-                pid
-            );
-
-            // Kill the process
-            match child.kill().await {
-                Ok(_) => {
-                    log::info!("Successfully killed Claude process via ClaudeProcessState");
-                    killed = true;
-                }
-                Err(e) => {
-                    log::error!(
-                        "Failed to kill Claude process via ClaudeProcessState: {}",
-                        e
-                    );
-
-                    // Method 3: If we have a PID, try system kill as last resort
-                    if let Some(pid) = pid {
-                        log::info!("Attempting system kill as last resort for PID: {}", pid);
-                        let kill_result = if cfg!(target_os = "windows") {
-                            std::process::Command::new("taskkill")
-                                .args(["/F", "/PID", &pid.to_string()])
-                                .output()
-                        } else {
-                            std::process::Command::new("kill")
-                                .args(["-KILL", &pid.to_string()])
-                                .output()
-                        };
-
-                        match kill_result {
-                            Ok(output) if output.status.success() => {
-                                log::info!("Successfully killed process via system command");
-                                killed = true;
-                            }
-                            Ok(output) => {
-                                let stderr = String::from_utf8_lossy(&output.stderr);
-                                log::error!("System kill failed: {}", stderr);
-                            }
-                            Err(e) => {
-                                log::error!("Failed to execute system kill command: {}", e);
+        if !processes.is_empty() {
+            for (tab_id, mut child) in processes.drain() {
+                let pid = child.id();
+                log::info!(
+                    "Attempting to kill Claude process for tab {} with PID: {:?}",
+                    tab_id, pid
+                );
+                match child.kill().await {
+                    Ok(_) => {
+                        log::info!("Successfully killed Claude process for tab {}", tab_id);
+                        killed = true;
+                    }
+                    Err(e) => {
+                        log::error!("Failed to kill Claude process for tab {}: {}", tab_id, e);
+                        // Method 3: system kill as last resort
+                        if let Some(pid) = pid {
+                            log::info!("Attempting system kill as last resort for PID: {}", pid);
+                            let kill_result = if cfg!(target_os = "windows") {
+                                std::process::Command::new("taskkill")
+                                    .args(["/F", "/PID", &pid.to_string()])
+                                    .output()
+                            } else {
+                                std::process::Command::new("kill")
+                                    .args(["-KILL", &pid.to_string()])
+                                    .output()
+                            };
+                            match kill_result {
+                                Ok(output) if output.status.success() => {
+                                    log::info!("Successfully killed process via system command");
+                                    killed = true;
+                                }
+                                Ok(output) => {
+                                    let stderr = String::from_utf8_lossy(&output.stderr);
+                                    log::error!("System kill failed: {}", stderr);
+                                }
+                                Err(e) => {
+                                    log::error!("Failed to execute system kill command: {}", e);
+                                }
                             }
                         }
                     }
@@ -1254,8 +1257,10 @@ pub async fn cancel_claude_execution(
             }
             attempted_methods.push("claude_state");
         } else {
-            log::warn!("No active Claude process in ClaudeProcessState");
+            log::warn!("No active Claude processes in ClaudeProcessState");
         }
+        // Also clear all stdins
+        claude_state.stdins.lock().await.clear();
     }
 
     if !killed && attempted_methods.is_empty() {
@@ -1305,10 +1310,12 @@ pub async fn get_claude_session_output(
     }
 }
 
-/// Helper function to spawn Claude process and handle streaming
+/// Helper function to spawn Claude process and handle streaming.
+/// Each tab gets its own independent subprocess; no existing process is killed.
 async fn spawn_claude_process(
     app: AppHandle,
     mut cmd: Command,
+    tab_id: String,
     prompt: String,
     model: String,
     project_path: String,
@@ -1328,7 +1335,7 @@ async fn spawn_claude_process(
 
     // Get the child PID for logging
     let pid = child.id().unwrap_or(0);
-    log::info!("Spawned Claude process with PID: {:?}", pid);
+    log::info!("Spawned Claude process with PID: {:?} for tab: {}", pid, tab_id);
 
     // Create readers first (before moving child)
     let stdout_reader = BufReader::new(stdout);
@@ -1338,21 +1345,20 @@ async fn spawn_claude_process(
     let session_id_holder: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
     let run_id_holder: Arc<Mutex<Option<i64>>> = Arc::new(Mutex::new(None));
 
-    // Store the child process and stdin in global state
+    // Store the child process keyed by tab_id (replacing any existing process for this tab)
     let claude_state = app.state::<ClaudeProcessState>();
     {
-        let mut current_process = claude_state.current_process.lock().await;
-        // If there's already a process running, kill it first
-        if let Some(mut existing_child) = current_process.take() {
-            log::warn!("Killing existing Claude process before starting new one");
-            let _ = existing_child.kill().await;
+        let mut processes = claude_state.processes.lock().await;
+        if let Some(mut old_child) = processes.remove(&tab_id) {
+            log::warn!("Killing previous process for tab {} before starting new one", tab_id);
+            let _ = old_child.kill().await;
         }
-        *current_process = Some(child);
+        processes.insert(tab_id.clone(), child);
     }
     {
-        let mut current_stdin = claude_state.current_stdin.lock().await;
-        // Write the initial prompt as the first stream-json message
+        let mut stdins = claude_state.stdins.lock().await;
         let mut stdin_writer = stdin;
+        // Write the initial prompt as the first stream-json message
         let initial_msg = format!("{{\"type\":\"user\",\"message\":{{\"role\":\"user\",\"content\":[{{\"type\":\"text\",\"text\":{}}}]}}}}\n", serde_json::to_string(&prompt).unwrap_or_default());
         use tokio::io::AsyncWriteExt;
         if let Err(e) = stdin_writer.write_all(initial_msg.as_bytes()).await {
@@ -1361,11 +1367,12 @@ async fn spawn_claude_process(
         if let Err(e) = stdin_writer.flush().await {
             log::error!("Failed to flush initial prompt to stdin: {}", e);
         }
-        *current_stdin = Some(stdin_writer);
+        stdins.insert(tab_id.clone(), stdin_writer);
     }
 
     // Spawn tasks to read stdout and stderr
     let app_handle = app.clone();
+    let tab_id_stdout = tab_id.clone();
     let session_id_holder_clone = session_id_holder.clone();
     let run_id_holder_clone = run_id_holder.clone();
     let registry = app.state::<crate::process::ProcessRegistryState>();
@@ -1373,11 +1380,12 @@ async fn spawn_claude_process(
     let project_path_clone = project_path.clone();
     let prompt_clone = prompt.clone();
     let model_clone = model.clone();
-    let claude_stdin_close = claude_state.current_stdin.clone();
+    let stdins_close = claude_state.stdins.clone();
+    let tab_id_stdin_close = tab_id.clone();
     let stdout_task = tokio::spawn(async move {
         let mut lines = stdout_reader.lines();
         while let Ok(Some(line)) = lines.next_line().await {
-            log::debug!("Claude stdout: {}", line);
+            log::debug!("Claude stdout (tab {}): {}", tab_id_stdout, line);
 
             // Parse the line to check for init message with session ID
             if let Ok(msg) = serde_json::from_str::<serde_json::Value>(&line) {
@@ -1386,7 +1394,7 @@ async fn spawn_claude_process(
                         let mut session_id_guard = session_id_holder_clone.lock().unwrap();
                         if session_id_guard.is_none() {
                             *session_id_guard = Some(claude_session_id.to_string());
-                            log::info!("Extracted Claude session ID: {}", claude_session_id);
+                            log::info!("Extracted Claude session ID: {} for tab: {}", claude_session_id, tab_id_stdout);
 
                             // Now register with ProcessRegistry using Claude's session ID
                             match registry_clone.register_claude_session(
@@ -1415,44 +1423,45 @@ async fn spawn_claude_process(
                 let _ = registry_clone.append_live_output(run_id, &line);
             }
 
-            // Emit the line to the frontend with session isolation if we have session ID
+            // Emit via tab-scoped channel (primary, for concurrent multi-tab support)
+            let _ = app_handle.emit(&format!("claude-output:{}", tab_id_stdout), &line);
+            // Also emit via session-scoped channel so cancel/reconnect by session_id still works
             if let Some(ref session_id) = *session_id_holder_clone.lock().unwrap() {
                 let _ = app_handle.emit(&format!("claude-output:{}", session_id), &line);
             }
-            // Also emit to the generic event for backward compatibility
-            let _ = app_handle.emit("claude-output", &line);
 
             // When Claude emits a "result" message, the turn is complete.
             // Close stdin so Claude knows no more input is coming and exits cleanly.
             if let Ok(msg) = serde_json::from_str::<serde_json::Value>(&line) {
                 if msg["type"] == "result" {
-                    log::info!("Claude turn complete (result message), closing stdin");
-                    let mut stdin_guard = claude_stdin_close.lock().await;
-                    *stdin_guard = None; // dropping ChildStdin closes the pipe
+                    log::info!("Claude turn complete (result message), closing stdin for tab {}", tab_id_stdin_close);
+                    stdins_close.lock().await.remove(&tab_id_stdin_close);
                 }
             }
         }
     });
 
     let app_handle_stderr = app.clone();
+    let tab_id_stderr = tab_id.clone();
     let session_id_holder_clone2 = session_id_holder.clone();
     let stderr_task = tokio::spawn(async move {
         let mut lines = stderr_reader.lines();
         while let Ok(Some(line)) = lines.next_line().await {
-            log::error!("Claude stderr: {}", line);
-            // Emit error lines to the frontend with session isolation if we have session ID
+            log::error!("Claude stderr (tab {}): {}", tab_id_stderr, line);
+            // Tab-scoped error channel
+            let _ = app_handle_stderr.emit(&format!("claude-error:{}", tab_id_stderr), &line);
+            // Session-scoped for backward compatibility
             if let Some(ref session_id) = *session_id_holder_clone2.lock().unwrap() {
                 let _ = app_handle_stderr.emit(&format!("claude-error:{}", session_id), &line);
             }
-            // Also emit to the generic event for backward compatibility
-            let _ = app_handle_stderr.emit("claude-error", &line);
         }
     });
 
     // Wait for the process to complete
     let app_handle_wait = app.clone();
-    let claude_state_wait = claude_state.current_process.clone();
-    let claude_stdin_wait = claude_state.current_stdin.clone();
+    let tab_id_wait = tab_id.clone();
+    let processes_wait = claude_state.processes.clone();
+    let stdins_wait = claude_state.stdins.clone();
     let session_id_holder_clone3 = session_id_holder.clone();
     let run_id_holder_clone2 = run_id_holder.clone();
     let registry_clone2 = registry.0.clone();
@@ -1460,33 +1469,33 @@ async fn spawn_claude_process(
         let _ = stdout_task.await;
         let _ = stderr_task.await;
 
-        // Get the child from the state to wait on it
-        let mut current_process = claude_state_wait.lock().await;
-        if let Some(mut child) = current_process.take() {
+        // Get the child from the per-tab map to wait on it
+        let mut child_opt = processes_wait.lock().await.remove(&tab_id_wait);
+        let success = if let Some(mut child) = child_opt.take() {
             match child.wait().await {
                 Ok(status) => {
-                    log::info!("Claude process exited with status: {}", status);
-                    // Add a small delay to ensure all messages are processed
-                    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-                    if let Some(ref session_id) = *session_id_holder_clone3.lock().unwrap() {
-                        let _ = app_handle_wait
-                            .emit(&format!("claude-complete:{}", session_id), status.success());
-                    }
-                    // Also emit to the generic event for backward compatibility
-                    let _ = app_handle_wait.emit("claude-complete", status.success());
+                    log::info!("Claude process for tab {} exited with status: {}", tab_id_wait, status);
+                    status.success()
                 }
                 Err(e) => {
-                    log::error!("Failed to wait for Claude process: {}", e);
-                    // Add a small delay to ensure all messages are processed
-                    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-                    if let Some(ref session_id) = *session_id_holder_clone3.lock().unwrap() {
-                        let _ =
-                            app_handle_wait.emit(&format!("claude-complete:{}", session_id), false);
-                    }
-                    // Also emit to the generic event for backward compatibility
-                    let _ = app_handle_wait.emit("claude-complete", false);
+                    log::error!("Failed to wait for Claude process (tab {}): {}", tab_id_wait, e);
+                    false
                 }
             }
+        } else {
+            // Process was already removed (e.g. killed by kill_tab_process)
+            log::info!("Claude process for tab {} already cleaned up", tab_id_wait);
+            false
+        };
+
+        // Small delay to ensure all messages are processed before sending complete
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+        // Emit completion via tab-scoped channel
+        let _ = app_handle_wait.emit(&format!("claude-complete:{}", tab_id_wait), success);
+        // Also via session-scoped channel for backward compatibility
+        if let Some(ref session_id) = *session_id_holder_clone3.lock().unwrap() {
+            let _ = app_handle_wait.emit(&format!("claude-complete:{}", session_id), success);
         }
 
         // Unregister from ProcessRegistry if we have a run_id
@@ -1494,12 +1503,26 @@ async fn spawn_claude_process(
             let _ = registry_clone2.unregister_process(run_id);
         }
 
-        // Clear the process and stdin from state
-        *current_process = None;
-        let mut stdin_guard = claude_stdin_wait.lock().await;
-        *stdin_guard = None;
+        // Clean up stdin entry if still present
+        stdins_wait.lock().await.remove(&tab_id_wait);
     });
 
+    Ok(())
+}
+
+/// Kill the Claude process for a specific tab (called when a chat tab is closed).
+#[tauri::command]
+pub async fn kill_tab_process(app: AppHandle, tab_id: String) -> Result<(), String> {
+    log::info!("Killing Claude process for closed tab: {}", tab_id);
+    let claude_state = app.state::<ClaudeProcessState>();
+    {
+        let mut processes = claude_state.processes.lock().await;
+        if let Some(mut child) = processes.remove(&tab_id) {
+            let _ = child.kill().await;
+            log::info!("Killed Claude process for tab {}", tab_id);
+        }
+    }
+    claude_state.stdins.lock().await.remove(&tab_id);
     Ok(())
 }
 

@@ -1028,24 +1028,34 @@ export const api = {
   },
 
   /**
-   * Executes a new interactive Claude Code session with streaming output
+   * Executes a new interactive Claude Code session with streaming output.
+   * @param tabId - The frontend Tab.id; used to route events to the correct tab.
    */
-  async executeClaudeCode(projectPath: string, prompt: string, model: string, use1MContext: boolean = false): Promise<void> {
-    return apiCall("execute_claude_code", { projectPath, prompt, model, use1MContext });
+  async executeClaudeCode(tabId: string, projectPath: string, prompt: string, model: string, use1MContext: boolean = false): Promise<void> {
+    return apiCall("execute_claude_code", { tabId, projectPath, prompt, model, use1MContext });
   },
 
   /**
-   * Continues an existing Claude Code conversation with streaming output
+   * Continues an existing Claude Code conversation with streaming output.
+   * @param tabId - The frontend Tab.id; used to route events to the correct tab.
    */
-  async continueClaudeCode(projectPath: string, prompt: string, model: string, use1MContext: boolean = false): Promise<void> {
-    return apiCall("continue_claude_code", { projectPath, prompt, model, use1MContext });
+  async continueClaudeCode(tabId: string, projectPath: string, prompt: string, model: string, use1MContext: boolean = false): Promise<void> {
+    return apiCall("continue_claude_code", { tabId, projectPath, prompt, model, use1MContext });
   },
 
   /**
-   * Resumes an existing Claude Code session by ID with streaming output
+   * Resumes an existing Claude Code session by ID with streaming output.
+   * @param tabId - The frontend Tab.id; used to route events to the correct tab.
    */
-  async resumeClaudeCode(projectPath: string, sessionId: string, prompt: string, model: string, use1MContext: boolean = false): Promise<void> {
-    return apiCall("resume_claude_code", { projectPath, sessionId, prompt, model, use1MContext });
+  async resumeClaudeCode(tabId: string, projectPath: string, sessionId: string, prompt: string, model: string, use1MContext: boolean = false): Promise<void> {
+    return apiCall("resume_claude_code", { tabId, projectPath, sessionId, prompt, model, use1MContext });
+  },
+
+  /**
+   * Kills the Claude subprocess owned by the given tab (called when the tab is closed).
+   */
+  async killTabProcess(tabId: string): Promise<void> {
+    return apiCall("kill_tab_process", { tabId });
   },
 
   /**

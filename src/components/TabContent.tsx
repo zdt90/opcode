@@ -302,6 +302,7 @@ const TabPanel = React.memo(({ tab, isActive }: TabPanelProps) => {
         return (
           <div className="h-full">
             <ClaudeCodeSession
+              tabId={tab.id}
               session={tab.sessionData} // Pass the full session object if available
               initialProjectPath={tab.initialProjectPath || tab.sessionId}
               isActive={isActive}
@@ -543,6 +544,13 @@ export const TabContent: React.FC = () => {
 
     const handleCloseTab = (event: CustomEvent) => {
       const { tabId } = event.detail;
+      // Kill the Claude subprocess for this tab if it's a chat tab
+      const closingTab = tabsRef.current.find(t => t.id === tabId);
+      if (closingTab?.type === 'chat') {
+        api.killTabProcess(tabId).catch(err =>
+          console.warn('[TabContent] Failed to kill process for closed tab:', err)
+        );
+      }
       closeTab(tabId);
     };
 
