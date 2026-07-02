@@ -25,13 +25,6 @@ type UnlistenFn = () => void;
 
 console.log('[ClaudeCodeSession] BUILD v7 - Tauri listen imported:', typeof tauriListenImport);
 
-// Module-level: only one ClaudeCodeSession may hold the generic (unscoped)
-// Tauri event listeners at a time. When a new session starts, the previous
-// generic listeners are cancelled to prevent messages from bleeding across tabs.
-// This mirrors the backend's single-process constraint: only one Claude process
-// runs at a time, so generic events always belong to the most recently started tab.
-let _cancelGenericListeners: (() => void) | null = null;
-
 // Web-compatible replacements
 const listen = tauriListenImport || ((eventName: string, callback: (event: any) => void) => {
   console.log('[ClaudeCodeSession] Setting up DOM event listener for:', eventName);
@@ -68,6 +61,11 @@ import { useTrackEvent, useComponentMetrics, useWorkflowTracking } from "@/hooks
 import { SessionPersistenceService } from "@/services/sessionPersistence";
 
 interface ClaudeCodeSessionProps {
+  /**
+   * The Tab.id from TabContext — used to route Tauri events to the correct tab
+   * and to scope the Claude subprocess on the backend.
+   */
+  tabId: string;
   /**
    * Optional session to resume (when clicking from SessionList)
    */
@@ -110,6 +108,7 @@ interface ClaudeCodeSessionProps {
  * <ClaudeCodeSession onBack={() => setView('projects')} />
  */
 export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
+  tabId,
   session,
   initialProjectPath = "",
   className,
@@ -676,7 +675,7 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
     if (isLoading) {
       console.log('[ClaudeCodeSession] BUILD v7 - mid-turn inject:', prompt);
       try {
-        await apiCall('inject_claude_message', { message: prompt });
+        await apiCall('inject_claude_message', { tabId, message: prompt });
         // Add the user message to the UI immediately
         setMessages(prev => [...prev, {
           type: 'user',
@@ -717,75 +716,33 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
         // --------------------------------------------------------------------
         // 1️⃣  Event Listener Setup Strategy
         // --------------------------------------------------------------------
-        // Claude Code may emit a *new* session_id even when we pass --resume. If
-        // we listen only on the old session-scoped channel we will miss the
-        // stream until the user navigates away & back. To avoid this we:
-        //   • Always start with GENERIC listeners (no suffix) so we catch the
-        //     very first "system:init" message regardless of the session id.
-        //   • Once that init message provides the *actual* session_id, we
-        //     dynamically switch to session-scoped listeners and stop the
-        //     generic ones to prevent duplicate handling.
+        // Each chat tab has its own Claude subprocess on the backend, keyed by
+        // tabId. We listen directly on the tab-scoped channel `claude-output:<tabId>`
+        // so messages are isolated by tab from the very first line — no generic
+        // (unscoped) listeners are needed and there is no risk of bleed between tabs.
         // --------------------------------------------------------------------
 
-        console.log('[ClaudeCodeSession] Setting up generic event listeners first');
+        console.log('[ClaudeCodeSession] Setting up tab-scoped event listeners for tab:', tabId);
 
         let currentSessionId: string | null = claudeSessionId || effectiveSession?.id || null;
 
-        // Helper to attach session-specific listeners **once we are sure**
-        const attachSessionSpecificListeners = async (sid: string) => {
-          console.log('[ClaudeCodeSession] Attaching session-specific listeners for', sid);
-
-          const specificOutputUnlisten = await listen(`claude-output:${sid}`, (evt: any) => {
-            handleStreamMessage(evt.payload);
-          });
-
-          const specificErrorUnlisten = await listen(`claude-error:${sid}`, (evt: any) => {
-            console.error('Claude error (scoped):', evt.payload);
-            setError(evt.payload);
-          });
-
-          const specificCompleteUnlisten = await listen(`claude-complete:${sid}`, (evt: any) => {
-            console.log('[ClaudeCodeSession] Received claude-complete (scoped):', evt.payload);
-            processComplete(evt.payload);
-          });
-
-          // Replace existing unlisten refs with these new ones (after cleaning up)
-          unlistenRefs.current.forEach((u) => u());
-          unlistenRefs.current = [specificOutputUnlisten, specificErrorUnlisten, specificCompleteUnlisten];
-
-          // Generic listeners have been replaced by scoped ones; release the
-          // module-level lock so the next tab's sendMessage can acquire it.
-          _cancelGenericListeners = null;
-        };
-
-        // Cancel generic listeners from any other tab that may still be in the
-        // init phase. The backend only runs one process at a time, so the previous
-        // tab's generic listeners would only ever receive *our* messages going forward.
-        if (_cancelGenericListeners) {
-          console.log('[ClaudeCodeSession] Evicting stale generic listeners from a previous tab');
-          _cancelGenericListeners();
-          _cancelGenericListeners = null;
-        }
-
-        // Generic listeners (catch-all)
-        const genericOutputUnlisten = await listen('claude-output', async (event: any) => {
+        // Tab-scoped output listener: receives all stdout lines for this tab
+        const tabOutputUnlisten = await listen(`claude-output:${tabId}`, async (event: any) => {
           handleStreamMessage(event.payload);
 
-          // Attempt to extract session_id on the fly (for the very first init)
+          // Extract session_id from the system:init message so that cancel,
+          // reconnect, and other session-id-based flows still work.
           try {
             const msg = JSON.parse(event.payload) as ClaudeStreamMessage;
             if (msg.type === 'system' && msg.subtype === 'init' && msg.session_id) {
               if (!currentSessionId || currentSessionId !== msg.session_id) {
-                console.log('[ClaudeCodeSession] Detected new session_id from generic listener:', msg.session_id);
+                console.log('[ClaudeCodeSession] Detected session_id from tab-scoped listener:', msg.session_id);
                 currentSessionId = msg.session_id;
                 setClaudeSessionId(msg.session_id);
 
-                // If we haven't extracted session info before, do it now
                 if (!extractedSessionInfo) {
                   const projectId = projectPath.replace(/[^a-zA-Z0-9]/g, '-');
                   setExtractedSessionInfo({ sessionId: msg.session_id, projectId });
-                  
-                  // Save session data for restoration
                   SessionPersistenceService.saveSession(
                     msg.session_id,
                     projectId,
@@ -793,9 +750,6 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
                     messages.length
                   );
                 }
-
-                // Switch to session-specific listeners
-                await attachSessionSpecificListeners(msg.session_id);
               }
             }
           } catch {
@@ -999,26 +953,17 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
           }
         };
 
-        const genericErrorUnlisten = await listen('claude-error', (evt: any) => {
-          console.error('Claude error:', evt.payload);
+        const tabErrorUnlisten = await listen(`claude-error:${tabId}`, (evt: any) => {
+          console.error(`Claude error (tab ${tabId}):`, evt.payload);
           setError(evt.payload);
         });
 
-        const genericCompleteUnlisten = await listen('claude-complete', (evt: any) => {
-          console.log('[ClaudeCodeSession] Received claude-complete (generic):', evt.payload);
+        const tabCompleteUnlisten = await listen(`claude-complete:${tabId}`, (evt: any) => {
+          console.log(`[ClaudeCodeSession] Received claude-complete for tab ${tabId}:`, evt.payload);
           processComplete(evt.payload);
         });
 
-        // Store the generic unlisteners for now; they may be replaced later.
-        unlistenRefs.current = [genericOutputUnlisten, genericErrorUnlisten, genericCompleteUnlisten];
-
-        // Register the module-level cancellation hook so any subsequent tab's
-        // sendMessage can evict these listeners before registering its own.
-        _cancelGenericListeners = () => {
-          genericOutputUnlisten();
-          genericErrorUnlisten();
-          genericCompleteUnlisten();
-        };
+        unlistenRefs.current = [tabOutputUnlisten, tabErrorUnlisten, tabCompleteUnlisten];
 
         // --------------------------------------------------------------------
         // 2️⃣  Auto-checkpoint logic moved after listener setup (unchanged)
@@ -1088,13 +1033,13 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
           console.log('[ClaudeCodeSession] Resuming session:', effectiveSession.id, 'in:', resumeProjectPath);
           trackEvent.sessionResumed(effectiveSession.id);
           trackEvent.modelSelected(model);
-          await api.resumeClaudeCode(resumeProjectPath, effectiveSession.id, prompt, model, use1MContext);
+          await api.resumeClaudeCode(tabId, resumeProjectPath, effectiveSession.id, prompt, model, use1MContext);
         } else {
           console.log('[ClaudeCodeSession] Starting new session');
           setIsFirstPrompt(false);
           trackEvent.sessionCreated(model, 'prompt_input');
           trackEvent.modelSelected(model);
-          await api.executeClaudeCode(projectPath, prompt, model, use1MContext);
+          await api.executeClaudeCode(tabId, projectPath, prompt, model, use1MContext);
         }
       }
     } catch (err) {
