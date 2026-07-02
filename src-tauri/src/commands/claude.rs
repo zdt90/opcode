@@ -2389,7 +2389,9 @@ fn write_opcode_metadata(map: &serde_json::Map<String, serde_json::Value>) -> Re
 }
 
 /// Deletes a session: removes the `.jsonl` file and any same-name subdirectory
-/// under `~/.claude/projects/<project_id>/`.
+/// under `~/.claude/projects/<project_id>/`, cleans up opcode-metadata.json,
+/// and strips matching entries from `~/.claude/history.jsonl` so that other
+/// Claude GUIs (e.g. claudecodeui) no longer discover the deleted session.
 ///
 /// Because we don't store per-session `project_id` here we scan all project
 /// directories for the matching JSONL file.
@@ -2436,7 +2438,7 @@ pub async fn delete_session(session_id: String) -> Result<(), String> {
         return Err(format!("Session not found: {}", session_id));
     }
 
-    // Also remove from metadata and archived list
+    // Remove from opcode metadata and archived list
     let mut meta = read_opcode_metadata();
     meta.remove(&session_id);
     let mut archived = get_archived_sessions_from_meta(&meta);
@@ -2449,7 +2451,87 @@ pub async fn delete_session(session_id: String) -> Result<(), String> {
     );
     let _ = write_opcode_metadata(&meta);
 
+    // Strip entries for this session from ~/.claude/history.jsonl so that
+    // other Claude GUIs that use history.jsonl for session discovery
+    // (e.g. claudecodeui) no longer show the deleted session.
+    let history_path = claude_dir.join("history.jsonl");
+    if history_path.exists() {
+        match purge_session_from_history(&history_path, &session_id) {
+            Ok(removed) => {
+                if removed > 0 {
+                    log::info!(
+                        "Removed {} history.jsonl entries for session {}",
+                        removed,
+                        session_id
+                    );
+                }
+            }
+            Err(e) => {
+                // Non-fatal: log but don't fail the whole delete
+                log::warn!("Failed to clean history.jsonl for session {}: {}", session_id, e);
+            }
+        }
+    }
+
     Ok(())
+}
+
+/// Rewrites `history.jsonl`, keeping only lines whose `sessionId` field does
+/// NOT equal `session_id`.  Returns the number of lines that were removed.
+fn purge_session_from_history(history_path: &std::path::Path, session_id: &str) -> Result<usize, String> {
+    use std::io::{BufRead, Write};
+
+    let file = fs::File::open(history_path)
+        .map_err(|e| format!("open: {}", e))?;
+    let reader = std::io::BufReader::new(file);
+
+    let mut kept: Vec<String> = Vec::new();
+    let mut removed: usize = 0;
+
+    for line in reader.lines() {
+        let line = line.map_err(|e| format!("read: {}", e))?;
+        if line.trim().is_empty() {
+            kept.push(line);
+            continue;
+        }
+        // Check whether this JSON line belongs to the deleted session.
+        // We do a quick string search before full parse to avoid overhead.
+        let belongs = if line.contains(session_id) {
+            serde_json::from_str::<serde_json::Value>(&line)
+                .ok()
+                .and_then(|v| v.get("sessionId").and_then(|s| s.as_str()).map(|s| s == session_id))
+                .unwrap_or(false)
+        } else {
+            false
+        };
+
+        if belongs {
+            removed += 1;
+        } else {
+            kept.push(line);
+        }
+    }
+
+    if removed == 0 {
+        return Ok(0);
+    }
+
+    // Write the filtered content to a temp file in the same directory, then
+    // atomically rename so we never leave history.jsonl half-written.
+    let parent = history_path.parent().ok_or("no parent dir")?;
+    let tmp_path = parent.join(format!(".history.jsonl.tmp.{}", std::process::id()));
+    {
+        let mut tmp = fs::File::create(&tmp_path)
+            .map_err(|e| format!("create tmp: {}", e))?;
+        for line in &kept {
+            writeln!(tmp, "{}", line).map_err(|e| format!("write tmp: {}", e))?;
+        }
+        tmp.flush().map_err(|e| format!("flush tmp: {}", e))?;
+    }
+    fs::rename(&tmp_path, history_path)
+        .map_err(|e| format!("rename: {}", e))?;
+
+    Ok(removed)
 }
 
 /// Saves a custom display name for a session in `~/.claude/opcode-metadata.json`
