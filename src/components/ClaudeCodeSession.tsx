@@ -424,14 +424,18 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
   const scrollToBottom = useCallback((behavior: ScrollBehavior = 'smooth') => {
     const el = parentRef.current;
     if (!el) return;
-    // Ask the virtualizer to render the last item before we scroll there
-    rowVirtualizer.scrollToIndex(displayableMessages.length - 1, { align: 'end', behavior: 'auto' });
-    requestAnimationFrame(() => {
-      el.scrollTo({ top: el.scrollHeight, behavior });
-    });
     isAtBottomRef.current = true;
     setIsAtBottom(true);
     setUnreadBelowCount(0);
+    // scrollToIndex tells the virtualizer to render the last item.
+    // Two nested rAFs: first lets the virtualizer commit its DOM update,
+    // second reads the updated scrollHeight and scrolls to the true bottom.
+    rowVirtualizer.scrollToIndex(displayableMessages.length - 1, { align: 'end', behavior: 'auto' });
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        el.scrollTo({ top: el.scrollHeight, behavior });
+      });
+    });
   }, [displayableMessages.length, rowVirtualizer]);
 
   // Smart auto-scroll: follow new messages only when the user is already at bottom.
@@ -451,7 +455,9 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
         if (!el) return;
         rowVirtualizer.scrollToIndex(n - 1, { align: 'end', behavior: 'auto' });
         requestAnimationFrame(() => {
-          el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+          requestAnimationFrame(() => {
+            el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+          });
         });
       }, 50);
     } else {
@@ -516,7 +522,9 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
           if (scrollElement) {
             rowVirtualizer.scrollToIndex(loadedMessages.length - 1, { align: 'end', behavior: 'auto' });
             requestAnimationFrame(() => {
-              scrollElement.scrollTo({ top: scrollElement.scrollHeight, behavior: 'auto' });
+              requestAnimationFrame(() => {
+                scrollElement.scrollTo({ top: scrollElement.scrollHeight, behavior: 'auto' });
+              });
             });
           }
         }
@@ -1411,7 +1419,10 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
       className="flex-1 overflow-y-auto relative"
       style={{
         contain: 'strict',
-        paddingBottom: `${inputBarHeight + 16}px`,
+        // Small padding inside the scroll area for visual breathing room.
+        // The inputBarHeight gap is handled by the outer container (below) so that
+        // the scrollbar track itself stops above the floating input bar.
+        paddingBottom: '16px',
       }}
     >
       <div
@@ -1518,7 +1529,7 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
             // Split pane layout when preview is active
             <SplitPane
               left={
-                <div className="h-full flex flex-col">
+                <div className="h-full flex flex-col" style={{ paddingBottom: `${inputBarHeight}px` }}>
                   {projectPathInput}
                   {messagesList}
                 </div>
@@ -1540,7 +1551,7 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
             />
           ) : (
             // Original layout when no preview
-            <div className="h-full flex flex-col max-w-6xl mx-auto px-6">
+            <div className="h-full flex flex-col max-w-6xl mx-auto px-6" style={{ paddingBottom: `${inputBarHeight}px` }}>
               {projectPathInput}
               {messagesList}
               
