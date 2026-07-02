@@ -31,6 +31,8 @@ console.log('[ClaudeCodeSession] BUILD v7 - Tauri listen imported:', typeof taur
 // This mirrors the backend's single-process constraint: only one Claude process
 // runs at a time, so generic events always belong to the most recently started tab.
 let _cancelGenericListeners: (() => void) | null = null;
+// Callback invoked on the evicted tab so it can clear its loading/active state.
+let _onGenericListenerEvicted: (() => void) | null = null;
 
 // Web-compatible replacements
 const listen = tauriListenImport || ((eventName: string, callback: (event: any) => void) => {
@@ -234,6 +236,24 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
   const messagesRef = useRef(messages);
   useEffect(() => { effectiveSessionRef.current = effectiveSession; }, [effectiveSession]);
   useEffect(() => { messagesRef.current = messages; }, [messages]);
+
+  // When the backend kills the previous Claude process to start a new one in
+  // another tab, it emits "claude-process-killed". If this session is still in
+  // its loading/active state, clear it so the tab doesn't remain stuck forever.
+  useEffect(() => {
+    let unlisten: (() => void) | null = null;
+    listen('claude-process-killed', () => {
+      if (hasActiveSessionRef.current) {
+        console.log('[ClaudeCodeSession] Backend process was killed by another tab; clearing loading state');
+        setIsLoading(false);
+        isListeningRef.current = false;
+        hasActiveSessionRef.current = false;
+        unlistenRefs.current.forEach(u => u());
+        unlistenRefs.current = [];
+      }
+    }).then(fn => { unlisten = fn; });
+    return () => { unlisten?.(); };
+  }, []); // Register once on mount
 
   // Filter out messages that shouldn't be displayed
   const displayableMessages = useMemo(() => {
@@ -727,6 +747,7 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
           // Generic listeners have been replaced by scoped ones; release the
           // module-level lock so the next tab's sendMessage can acquire it.
           _cancelGenericListeners = null;
+          _onGenericListenerEvicted = null;
         };
 
         // Cancel generic listeners from any other tab that may still be in the
@@ -736,6 +757,11 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
           console.log('[ClaudeCodeSession] Evicting stale generic listeners from a previous tab');
           _cancelGenericListeners();
           _cancelGenericListeners = null;
+          // Notify the evicted tab so it can exit its loading/active state cleanly.
+          if (_onGenericListenerEvicted) {
+            _onGenericListenerEvicted();
+            _onGenericListenerEvicted = null;
+          }
         }
 
         // Generic listeners (catch-all)
@@ -989,6 +1015,12 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
           genericOutputUnlisten();
           genericErrorUnlisten();
           genericCompleteUnlisten();
+        };
+        _onGenericListenerEvicted = () => {
+          console.log('[ClaudeCodeSession] This tab was evicted from generic listeners; clearing loading state');
+          setIsLoading(false);
+          isListeningRef.current = false;
+          hasActiveSessionRef.current = false;
         };
 
         // --------------------------------------------------------------------

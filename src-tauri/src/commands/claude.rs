@@ -1342,10 +1342,12 @@ async fn spawn_claude_process(
     let claude_state = app.state::<ClaudeProcessState>();
     {
         let mut current_process = claude_state.current_process.lock().await;
-        // If there's already a process running, kill it first
+        // If there's already a process running, kill it first and notify the frontend
+        // so the tab that owned the previous process can exit its loading state cleanly.
         if let Some(mut existing_child) = current_process.take() {
             log::warn!("Killing existing Claude process before starting new one");
             let _ = existing_child.kill().await;
+            let _ = app_handle.emit("claude-process-killed", ());
         }
         *current_process = Some(child);
     }
