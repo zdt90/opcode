@@ -1,4 +1,4 @@
-import React, { Suspense, lazy, useEffect } from 'react';
+import React, { Suspense, lazy, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useTabState } from '@/hooks/useTabState';
 import { useScreenTracking } from '@/hooks/useAnalytics';
@@ -489,6 +489,13 @@ const TabPanel = React.memo(({ tab, isActive }: TabPanelProps) => {
 
 export const TabContent: React.FC = () => {
   const { tabs, activeTabId, createChatTab, createProjectsTab, findTabBySessionId, createClaudeFileTab, createAgentExecutionTab, createCreateAgentTab, createImportAgentTab, closeTab, updateTab } = useTabState();
+
+  // Refs that always hold the latest values without causing the event-listener
+  // useEffect below to re-run (and re-register all listeners) on every tab change.
+  const tabsRef = useRef(tabs);
+  const activeTabIdRef = useRef(activeTabId);
+  useEffect(() => { tabsRef.current = tabs; }, [tabs]);
+  useEffect(() => { activeTabIdRef.current = activeTabId; }, [activeTabId]);
   
   // Listen for events to open sessions in tabs
   useEffect(() => {
@@ -560,7 +567,9 @@ export const TabContent: React.FC = () => {
           updateTab(newTabId, { sessionData: session, initialProjectPath: session.project_path });
         }
       } else {
-        const currentTab = tabs.find(t => t.id === activeTabId);
+        // Use refs to get the latest tabs/activeTabId — the closure captured by
+        // this handler is stale if tabs changed after this useEffect last ran.
+        const currentTab = tabsRef.current.find(t => t.id === activeTabIdRef.current);
         if (currentTab) {
           updateTab(currentTab.id, {
             type: 'chat',
