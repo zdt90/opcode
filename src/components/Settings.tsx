@@ -9,6 +9,11 @@ import {
   Loader2,
   Shield,
   Check,
+  ChevronDown,
+  Crown,
+  Rocket,
+  Sparkles,
+  Zap,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -16,11 +21,19 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Card } from "@/components/ui/card";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { Popover } from "@/components/ui/popover";
 import { 
   api, 
   type ClaudeSettings,
   type ClaudeInstallation
 } from "@/lib/api";
+import {
+  CLAUDE_MODELS,
+  DEFAULT_MODEL_ID,
+  DEFAULT_MODEL_SETTING_KEY,
+  normalizeModelId,
+  type ModelId,
+} from "@/lib/claudeModels";
 import { cn } from "@/lib/utils";
 import { Toast, ToastContainer } from "@/components/ui/toast";
 import { ClaudeVersionSelector } from "./ClaudeVersionSelector";
@@ -55,6 +68,102 @@ interface EnvironmentVariable {
   key: string;
   value: string;
 }
+
+const MODEL_FAMILY_ORDER = ["Sonnet", "Haiku", "Opus", "Fable"];
+
+const SETTINGS_MODEL_GROUPS = MODEL_FAMILY_ORDER.map((family) => ({
+  family,
+  models: CLAUDE_MODELS.filter((model) => model.family === family),
+})).filter((group) => group.models.length > 0);
+
+const modelIcon = (model: (typeof CLAUDE_MODELS)[number]) => {
+  if (model.family === "Fable") return <Crown className="h-3.5 w-3.5" />;
+  if (model.family === "Opus" && model.version !== "4.6") return <Rocket className="h-3.5 w-3.5" />;
+  if (model.family === "Opus") return <Sparkles className="h-3.5 w-3.5" />;
+  return <Zap className="h-3.5 w-3.5" />;
+};
+
+const modelIconColor = (model: (typeof CLAUDE_MODELS)[number]) => {
+  if (model.family === "Fable" || model.highCost) return "text-amber-500";
+  if (model.family === "Haiku") return "text-muted-foreground";
+  return "text-primary";
+};
+
+const DefaultModelSelector: React.FC<{
+  value: ModelId;
+  onValueChange: (value: ModelId) => void;
+}> = ({ value, onValueChange }) => {
+  const [open, setOpen] = useState(false);
+  const selectedModel = CLAUDE_MODELS.find((model) => model.id === value) ?? CLAUDE_MODELS[0];
+
+  return (
+    <Popover
+      trigger={
+        <button
+          type="button"
+          className="flex h-10 w-[240px] items-center gap-2 rounded-md border border-input bg-background px-3 text-left shadow-sm transition-colors hover:bg-accent/40"
+        >
+          <span className={modelIconColor(selectedModel)}>{modelIcon(selectedModel)}</span>
+          <span className="flex flex-1 items-baseline gap-1.5">
+            <span className="text-sm font-medium text-foreground">{selectedModel.family}</span>
+            <span className="text-xs text-muted-foreground">{selectedModel.version}</span>
+          </span>
+          {selectedModel.highCost && <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />}
+          <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+        </button>
+      }
+      content={
+        <div className="w-[240px] p-2">
+          {SETTINGS_MODEL_GROUPS.map((group, groupIndex) => {
+            const familyModel = group.models[0];
+
+            return (
+              <div
+                key={group.family}
+                className={cn(groupIndex > 0 && "mt-1.5 border-t border-border/50 pt-1.5")}
+              >
+                <div className="flex items-center gap-1.5 px-1.5 pb-1 text-[11px] font-semibold text-muted-foreground">
+                  <span className={modelIconColor(familyModel)}>{modelIcon(familyModel)}</span>
+                  <span>{group.family}</span>
+                </div>
+                <div className="flex flex-wrap gap-1">
+                  {group.models.map((model) => {
+                    const isSelected = model.id === value;
+
+                    return (
+                      <button
+                        key={model.id}
+                        type="button"
+                        onClick={() => {
+                          onValueChange(model.id);
+                          setOpen(false);
+                        }}
+                        className={cn(
+                          "flex h-7 min-w-[54px] items-center justify-center gap-1.5 rounded-md px-2 text-xs font-medium transition-colors",
+                          "text-muted-foreground hover:bg-accent hover:text-foreground",
+                          isSelected && "bg-accent text-foreground"
+                        )}
+                      >
+                        <span>{model.version}</span>
+                        {model.highCost && <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />}
+                        {isSelected && <Check className="h-3 w-3 text-primary" />}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      }
+      open={open}
+      onOpenChange={setOpen}
+      align="end"
+      side="bottom"
+      className="p-0"
+    />
+  );
+};
 
 /**
  * Comprehensive Settings UI for managing Claude Code settings
@@ -92,6 +201,7 @@ export const Settings: React.FC<SettingsProps> = ({
 
   // Input behavior
   const { autoCorrect, setAutoCorrect } = useInputBehavior();
+  const [defaultModel, setDefaultModel] = useState<ModelId>(DEFAULT_MODEL_ID);
   
   // Proxy state
   const [proxySettingsChanged, setProxySettingsChanged] = useState(false);
@@ -112,6 +222,7 @@ export const Settings: React.FC<SettingsProps> = ({
   useEffect(() => {
     loadSettings();
     loadClaudeBinaryPath();
+    loadDefaultModel();
     loadAnalyticsSettings();
     // Load tab persistence setting
     setTabPersistenceEnabled(TabPersistenceService.isEnabled());
@@ -135,6 +246,11 @@ export const Settings: React.FC<SettingsProps> = ({
     if (settings) {
       setAnalyticsEnabled(settings.enabled);
     }
+  };
+
+  const loadDefaultModel = async () => {
+    const savedDefaultModel = await api.getSetting(DEFAULT_MODEL_SETTING_KEY);
+    setDefaultModel(normalizeModelId(savedDefaultModel));
   };
 
   /**
@@ -232,6 +348,11 @@ export const Settings: React.FC<SettingsProps> = ({
 
       await api.saveClaudeSettings(updatedSettings);
       setSettings(updatedSettings);
+
+      await api.saveSetting(DEFAULT_MODEL_SETTING_KEY, defaultModel);
+      window.dispatchEvent(new CustomEvent("opcode-default-model-changed", {
+        detail: { model: defaultModel },
+      }));
 
       // Save Claude binary path if changed
       if (binaryPathChanged && selectedInstallation) {
@@ -512,6 +633,20 @@ export const Settings: React.FC<SettingsProps> = ({
                           </button>
                         ))}
                       </div>
+                    </div>
+
+                    {/* Default Model Selector */}
+                    <div className="flex items-center justify-between gap-6">
+                      <div>
+                        <Label>Default model</Label>
+                        <p className="text-caption text-muted-foreground mt-1">
+                          Used when starting a new session
+                        </p>
+                      </div>
+                      <DefaultModelSelector
+                        value={defaultModel}
+                        onValueChange={setDefaultModel}
+                      />
                     </div>
 
                     {/* Custom Color Editor */}

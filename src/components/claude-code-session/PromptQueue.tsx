@@ -4,7 +4,7 @@ import { X, Clock, Sparkles, Zap } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
-import { type ModelId } from '../FloatingPromptInput';
+import { getModelOption, type ModelId } from '@/lib/claudeModels';
 
 interface QueuedPrompt {
   id: string;
@@ -45,6 +45,10 @@ export const PromptQueue: React.FC<PromptQueueProps> = React.memo(({
         <div className="space-y-2 max-h-32 overflow-y-auto">
           <AnimatePresence mode="popLayout">
             {queuedPrompts.map((queuedPrompt, index) => (
+              (() => {
+                const model = getModelOption(queuedPrompt.model);
+                const isOpus = model.name.startsWith("Opus");
+                return (
               <motion.div
                 key={queuedPrompt.id}
                 initial={{ opacity: 0, x: -20 }}
@@ -54,7 +58,7 @@ export const PromptQueue: React.FC<PromptQueueProps> = React.memo(({
                 className="flex items-start gap-2 p-2 rounded-md bg-background/50"
               >
                 <div className="flex-shrink-0 mt-0.5">
-                  {queuedPrompt.model === "opus" || queuedPrompt.model === "opus-4-7" ? (
+                  {isOpus ? (
                     <Sparkles className="h-3.5 w-3.5 text-purple-500" />
                   ) : (
                     <Zap className="h-3.5 w-3.5 text-amber-500" />
@@ -64,10 +68,7 @@ export const PromptQueue: React.FC<PromptQueueProps> = React.memo(({
                 <div className="flex-1 min-w-0">
                   <p className="text-sm truncate">{queuedPrompt.prompt}</p>
                   <span className="text-xs text-muted-foreground">
-                    {queuedPrompt.model === "opus" ? "Opus 4.6"
-                      : queuedPrompt.model === "opus-4-7" ? "Opus 4.7"
-                      : queuedPrompt.model === "haiku" ? "Haiku 4.5"
-                      : "Sonnet 4.6"}
+                    {model.name}
                   </span>
                 </div>
                 
@@ -80,6 +81,8 @@ export const PromptQueue: React.FC<PromptQueueProps> = React.memo(({
                   <X className="h-3 w-3" />
                 </Button>
               </motion.div>
+                );
+              })()
             ))}
           </AnimatePresence>
         </div>

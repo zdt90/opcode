@@ -3,7 +3,7 @@
  * Stored as a flat JSON object in localStorage so it survives tab/app restarts.
  */
 
-import type { ModelId } from "@/components/FloatingPromptInput";
+import { normalizeModelId, type ModelId } from "@/lib/claudeModels";
 
 const STORAGE_KEY = "opcode_session_models";
 const MAX_ENTRIES = 200; // trim oldest entries to avoid unbounded growth
@@ -35,7 +35,8 @@ function save(map: SessionModelMap): void {
 
 export const sessionModelStore = {
   get(sessionId: string): ModelId | null {
-    return load()[sessionId] ?? null;
+    const value = load()[sessionId];
+    return value ? normalizeModelId(value) : null;
   },
 
   set(sessionId: string, model: ModelId): void {
