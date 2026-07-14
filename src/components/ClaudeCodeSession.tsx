@@ -45,8 +45,15 @@ const listen = tauriListenImport || ((eventName: string, callback: (event: any) 
   });
 });
 import { StreamMessage } from "./StreamMessage";
-import { FloatingPromptInput, type FloatingPromptInputRef, type ModelId } from "./FloatingPromptInput";
+import { FloatingPromptInput, type FloatingPromptInputRef } from "./FloatingPromptInput";
 import { sessionModelStore } from "@/lib/sessionModelStore";
+import {
+  DEFAULT_MODEL_ID,
+  DEFAULT_MODEL_SETTING_KEY,
+  getModelOption,
+  normalizeModelId,
+  type ModelId,
+} from "@/lib/claudeModels";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { TimelineNavigator } from "./TimelineNavigator";
 import { CheckpointSettings } from "./CheckpointSettings";
@@ -126,7 +133,13 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
   // Read directly from localStorage — no React state — so the value is always
   // fresh when FloatingPromptInput mounts with the new session key.
   const currentDraft = (() => { try { return localStorage.getItem(draftKey) || ""; } catch { return ""; } })();
+  const [defaultModel, setDefaultModel] = useState<ModelId>(() => normalizeModelId(
+    typeof window !== 'undefined'
+      ? window.localStorage.getItem(`app_setting:${DEFAULT_MODEL_SETTING_KEY}`)
+      : null
+  ));
   const currentSessionModel = session?.id ? sessionModelStore.get(session.id) ?? undefined : undefined;
+  const effectiveDefaultModel = currentSessionModel ?? defaultModel;
   const [inputBarHeight, setInputBarHeight] = useState(96);
   const [messages, setMessages] = useState<ClaudeStreamMessage[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -143,6 +156,21 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
   const [showForkDialog, setShowForkDialog] = useState(false);
   const [showSlashCommandsSettings, setShowSlashCommandsSettings] = useState(false);
   const [forkCheckpointId, setForkCheckpointId] = useState<string | null>(null);
+
+  useEffect(() => {
+    const refreshDefaultModel = () => {
+      setDefaultModel(normalizeModelId(
+        window.localStorage.getItem(`app_setting:${DEFAULT_MODEL_SETTING_KEY}`)
+      ));
+    };
+
+    window.addEventListener("opcode-default-model-changed", refreshDefaultModel);
+    window.addEventListener("storage", refreshDefaultModel);
+    return () => {
+      window.removeEventListener("opcode-default-model-changed", refreshDefaultModel);
+      window.removeEventListener("storage", refreshDefaultModel);
+    };
+  }, []);
   const [forkSessionName, setForkSessionName] = useState("");
   
   // Queued prompts state
@@ -900,7 +928,7 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
               // Session context
               model: metrics.modelChanges.length > 0 
                 ? metrics.modelChanges[metrics.modelChanges.length - 1].to 
-                : 'sonnet',
+                : DEFAULT_MODEL_ID,
               has_checkpoints: metrics.checkpointCount > 0,
               checkpoint_count: metrics.checkpointCount,
               was_resumed: metrics.wasResumed,
@@ -993,7 +1021,7 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
         // Track model changes
         const lastModel = sessionMetrics.current.modelChanges.length > 0 
           ? sessionMetrics.current.modelChanges[sessionMetrics.current.modelChanges.length - 1].to
-          : (sessionMetrics.current.wasResumed ? 'sonnet' : model); // Default to sonnet if resumed
+          : (sessionMetrics.current.wasResumed ? DEFAULT_MODEL_ID : model);
         
         if (lastModel !== model) {
           sessionMetrics.current.modelChanges.push({
@@ -1187,7 +1215,7 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
         // Session context
         model: metrics.modelChanges.length > 0 
           ? metrics.modelChanges[metrics.modelChanges.length - 1].to 
-          : 'sonnet', // Default to sonnet
+          : DEFAULT_MODEL_ID,
         has_checkpoints: metrics.checkpointCount > 0,
         checkpoint_count: metrics.checkpointCount,
         was_resumed: metrics.wasResumed,
@@ -1570,39 +1598,42 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
                       </motion.div>
                     </TooltipSimple>
                   </div>
-                  {!queuedPromptsCollapsed && queuedPrompts.map((queuedPrompt, index) => (
-                    <motion.div
-                      key={queuedPrompt.id}
-                      initial={{ opacity: 0, y: 4 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, y: -4 }}
-                      transition={{ duration: 0.15, delay: index * 0.02 }}
-                      className="flex items-start gap-2 bg-muted/50 rounded-md p-2"
-                    >
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 mb-1">
-                          <span className="text-xs font-medium text-muted-foreground">#{index + 1}</span>
-                          <span className="text-xs px-1.5 py-0.5 bg-primary/10 text-primary rounded">
-                            {queuedPrompt.model === "opus" ? "Opus" : "Sonnet"}
-                          </span>
-                        </div>
-                        <p className="text-sm line-clamp-2 break-words">{queuedPrompt.prompt}</p>
-                      </div>
+                  {!queuedPromptsCollapsed && queuedPrompts.map((queuedPrompt, index) => {
+                    const model = getModelOption(queuedPrompt.model);
+                    return (
                       <motion.div
-                        whileTap={{ scale: 0.97 }}
-                        transition={{ duration: 0.15 }}
+                        key={queuedPrompt.id}
+                        initial={{ opacity: 0, y: 4 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: -4 }}
+                        transition={{ duration: 0.15, delay: index * 0.02 }}
+                        className="flex items-start gap-2 bg-muted/50 rounded-md p-2"
                       >
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-6 w-6 flex-shrink-0"
-                          onClick={() => setQueuedPrompts(prev => prev.filter(p => p.id !== queuedPrompt.id))}
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className="text-xs font-medium text-muted-foreground">#{index + 1}</span>
+                            <span className="text-xs px-1.5 py-0.5 bg-primary/10 text-primary rounded">
+                              {model.name}
+                            </span>
+                          </div>
+                          <p className="text-sm line-clamp-2 break-words">{queuedPrompt.prompt}</p>
+                        </div>
+                        <motion.div
+                          whileTap={{ scale: 0.97 }}
+                          transition={{ duration: 0.15 }}
                         >
-                          <X className="h-3 w-3" />
-                        </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-6 w-6 flex-shrink-0"
+                            onClick={() => setQueuedPrompts(prev => prev.filter(p => p.id !== queuedPrompt.id))}
+                          >
+                            <X className="h-3 w-3" />
+                          </Button>
+                        </motion.div>
                       </motion.div>
-                    </motion.div>
-                  ))}
+                    );
+                  })}
                 </div>
               </motion.div>
             )}
@@ -1749,7 +1780,7 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
               disabled={!projectPath}
               projectPath={projectPath}
               isActive={isActive}
-              defaultModel={currentSessionModel}
+              defaultModel={effectiveDefaultModel}
               onModelChange={(model) => {
                 const sessionId = effectiveSession?.id ?? claudeSessionId;
                 if (sessionId) sessionModelStore.set(sessionId, model);

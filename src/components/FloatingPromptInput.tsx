@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Send,
+  Check,
   Maximize2,
   Minimize2,
   ChevronUp,
@@ -12,6 +13,7 @@ import {
   Lightbulb,
   Cpu,
   Rocket,
+  Crown,
   AlertTriangle,
   Database,
 } from "lucide-react";
@@ -25,6 +27,13 @@ import { SlashCommandPicker } from "./SlashCommandPicker";
 import { useInputBehavior } from "@/contexts/InputBehaviorContext";
 import { ImagePreview } from "./ImagePreview";
 import { type FileEntry, type SlashCommand } from "@/lib/api";
+import {
+  CLAUDE_MODELS,
+  DEFAULT_MODEL_ID,
+  getModelOption,
+  normalizeModelId,
+  type ModelId,
+} from "@/lib/claudeModels";
 import {
   Dialog,
   DialogContent,
@@ -201,56 +210,92 @@ const ThinkingModeIndicator: React.FC<{ level: number; color?: string }> = ({ le
   );
 };
 
-export type ModelId = "sonnet" | "opus" | "haiku" | "opus-4-7";
-
-type Model = {
-  id: ModelId;
-  /** The string actually passed to `--model`. Falls back to `id` if omitted. */
-  modelParam?: string;
-  name: string;
-  description: string;
-  icon: React.ReactNode;
-  shortName: string;
-  color: string;
-  highCost?: boolean;
+const MODEL_ICONS: Record<ModelId, React.ReactNode> = {
+  "global.anthropic.claude-sonnet-4-6": <Zap className="h-3.5 w-3.5" />,
+  "global.anthropic.claude-sonnet-5": <Zap className="h-3.5 w-3.5" />,
+  "global.anthropic.claude-haiku-4-5": <Zap className="h-3.5 w-3.5" />,
+  "global.anthropic.claude-opus-4-6": <Sparkles className="h-3.5 w-3.5" />,
+  "global.anthropic.claude-opus-4-7": <Rocket className="h-3.5 w-3.5" />,
+  "global.anthropic.claude-opus-4-8": <Rocket className="h-3.5 w-3.5" />,
+  "global.anthropic.claude-fable-5": <Crown className="h-3.5 w-3.5" />,
 };
 
-const MODELS: Model[] = [
-  {
-    id: "sonnet",
-    name: "Claude Sonnet 4.6",
-    description: "Faster, efficient for most tasks",
-    icon: <Zap className="h-3.5 w-3.5" />,
-    shortName: "S4.6",
-    color: "text-primary"
-  },
-  {
-    id: "opus",
-    name: "Claude Opus 4.6",
-    description: "More capable, better for complex tasks",
-    icon: <Sparkles className="h-3.5 w-3.5" />,
-    shortName: "O4.6",
-    color: "text-primary"
-  },
-  {
-    id: "haiku",
-    name: "Claude Haiku 4.5",
-    description: "Fastest and most compact model",
-    icon: <Zap className="h-3.5 w-3.5" />,
-    shortName: "H4.5",
-    color: "text-muted-foreground"
-  },
-  {
-    id: "opus-4-7",
-    modelParam: "global.anthropic.claude-opus-4-7",
-    name: "Claude Opus 4.7",
-    description: "Most powerful — significantly higher cost",
-    icon: <Rocket className="h-3.5 w-3.5" />,
-    shortName: "O4.7",
-    color: "text-amber-500",
-    highCost: true,
-  },
-];
+const MODEL_COLORS: Record<ModelId, string> = {
+  "global.anthropic.claude-sonnet-4-6": "text-primary",
+  "global.anthropic.claude-sonnet-5": "text-primary",
+  "global.anthropic.claude-haiku-4-5": "text-muted-foreground",
+  "global.anthropic.claude-opus-4-6": "text-primary",
+  "global.anthropic.claude-opus-4-7": "text-amber-500",
+  "global.anthropic.claude-opus-4-8": "text-amber-500",
+  "global.anthropic.claude-fable-5": "text-amber-500",
+};
+
+const MODELS = CLAUDE_MODELS.map((model) => ({
+  ...model,
+  icon: MODEL_ICONS[model.id],
+  color: MODEL_COLORS[model.id],
+}));
+
+type ModelOption = (typeof MODELS)[number];
+
+const MODEL_FAMILY_ORDER = ["Sonnet", "Haiku", "Opus", "Fable"];
+
+const MODEL_GROUPS = MODEL_FAMILY_ORDER.map((family) => ({
+  family,
+  models: MODELS.filter((model) => model.family === family),
+})).filter((group) => group.models.length > 0);
+
+const ModelPickerContent: React.FC<{
+  selectedModel: ModelId;
+  onSelect: (modelId: ModelId) => void;
+}> = ({ selectedModel, onSelect }) => (
+  <div className="w-[280px] p-2">
+    {MODEL_GROUPS.map((group, groupIndex) => {
+      const familyModel = group.models[0];
+
+      return (
+        <div
+          key={group.family}
+          className={cn(groupIndex > 0 && "mt-1.5 border-t border-border/50 pt-1.5")}
+        >
+          <div className="flex items-center gap-1.5 px-1.5 pb-1 text-[11px] font-semibold text-muted-foreground">
+            <span className={familyModel.color}>{familyModel.icon}</span>
+            <span>{group.family}</span>
+          </div>
+          <div className="space-y-0.5">
+            {group.models.map((model: ModelOption) => {
+              const isSelected = selectedModel === model.id;
+
+              return (
+                <button
+                  key={model.id}
+                  onClick={() => onSelect(model.id)}
+                  title={model.highCost ? `${model.description} (higher usage cost)` : model.description}
+                  className={cn(
+                    "grid min-h-9 w-full grid-cols-[36px_1fr_auto] items-center gap-2 rounded-md px-2 text-left transition-colors",
+                    "text-muted-foreground hover:bg-accent hover:text-foreground",
+                    isSelected && "bg-accent text-foreground"
+                  )}
+                >
+                  <span className="text-xs font-semibold text-foreground">{model.version}</span>
+                  <span className="truncate text-[10px] leading-tight text-muted-foreground">
+                    {model.description}
+                  </span>
+                  <span className="flex min-w-3 items-center justify-end gap-1.5">
+                    {model.highCost && (
+                      <span className="h-1.5 w-1.5 rounded-full bg-amber-500" aria-label="Higher usage cost" />
+                    )}
+                    {isSelected && <Check className="h-3 w-3 text-primary" />}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      );
+    })}
+  </div>
+);
 
 /**
  * FloatingPromptInput component - Fixed position prompt input with model picker
@@ -268,7 +313,7 @@ const FloatingPromptInputInner = (
     onSend,
     isLoading = false,
     disabled = false,
-    defaultModel = "sonnet",
+    defaultModel = DEFAULT_MODEL_ID,
     projectPath,
     className,
     onCancel,
@@ -304,10 +349,10 @@ const FloatingPromptInputInner = (
     });
   }, []);
 
-  const [selectedModel, setSelectedModel] = useState<ModelId>(defaultModel ?? "sonnet");
+  const [selectedModel, setSelectedModel] = useState<ModelId>(() => normalizeModelId(defaultModel));
   const [selectedThinkingMode, setSelectedThinkingMode] = useState<ThinkingMode>("auto");
   const [use1MContext, setUse1MContext] = useState(false);
-  const [pendingHighCostAction, setPendingHighCostAction] = useState<null | "opus-4-7" | "1m-context">(null);
+  const [pendingHighCostAction, setPendingHighCostAction] = useState<null | ModelId | "1m-context">(null);
   const [isExpanded, setIsExpanded] = useState(false);
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
   const [thinkingModePickerOpen, setThinkingModePickerOpen] = useState(false);
@@ -335,6 +380,9 @@ const FloatingPromptInputInner = (
 
   const onModelChangeRef = useRef(onModelChange);
   useEffect(() => { onModelChangeRef.current = onModelChange; }, [onModelChange]);
+  useEffect(() => {
+    setSelectedModel(normalizeModelId(defaultModel));
+  }, [defaultModel]);
 
   // Expose a method to add images programmatically
   React.useImperativeHandle(
@@ -883,9 +931,7 @@ const FloatingPromptInputInner = (
         finalPrompt = `${finalPrompt}.\n\n${thinkingMode.phrase}.`;
       }
 
-      const modelData = MODELS.find(m => m.id === selectedModel);
-      const modelParam = (modelData?.modelParam ?? selectedModel) as ModelId;
-      onSend(finalPrompt, modelParam, use1MContext);
+      onSend(finalPrompt, selectedModel, use1MContext);
       setPrompt("");
       setEmbeddedImages([]);
       setTextareaHeight(48); // Reset height after sending
@@ -1048,11 +1094,14 @@ const FloatingPromptInputInner = (
   };
 
   const selectedModelData = MODELS.find(m => m.id === selectedModel) || MODELS[0];
+  const pendingModel = pendingHighCostAction && pendingHighCostAction !== "1m-context"
+    ? getModelOption(pendingHighCostAction)
+    : null;
 
   const handleModelSelect = (modelId: ModelId) => {
     const model = MODELS.find(m => m.id === modelId);
     if (model?.highCost) {
-      setPendingHighCostAction("opus-4-7");
+      setPendingHighCostAction(modelId);
     } else {
       setSelectedModel(modelId);
       setModelPickerOpen(false);
@@ -1069,10 +1118,10 @@ const FloatingPromptInputInner = (
   };
 
   const confirmHighCostAction = () => {
-    if (pendingHighCostAction === "opus-4-7") {
-      setSelectedModel("opus-4-7");
+    if (pendingHighCostAction && pendingHighCostAction !== "1m-context") {
+      setSelectedModel(pendingHighCostAction);
       setModelPickerOpen(false);
-      onModelChangeRef.current?.("opus-4-7");
+      onModelChangeRef.current?.(pendingHighCostAction);
     } else if (pendingHighCostAction === "1m-context") {
       setUse1MContext(true);
     }
@@ -1091,8 +1140,8 @@ const FloatingPromptInputInner = (
               High Cost Warning
             </DialogTitle>
             <DialogDescription className="pt-1">
-              {pendingHighCostAction === "opus-4-7"
-                ? "Claude Opus 4.7 is significantly more expensive than Opus 4.6 without proportional benefit for most tasks. Are you sure you want to use it?"
+              {pendingModel
+                ? `${pendingModel.name} is significantly more expensive than the default model. Are you sure you want to use it?`
                 : "The 1M extended context window increases cost substantially and is unnecessary for most use cases. Are you sure you want to enable it?"}
             </DialogDescription>
           </DialogHeader>
@@ -1191,41 +1240,16 @@ const FloatingPromptInputInner = (
                         </Button>
                       }
                       content={
-                        <div className="w-[300px] p-1">
-                          {MODELS.map((model) => (
-                            <button
-                              key={model.id}
-                              onClick={() => handleModelSelect(model.id)}
-                              className={cn(
-                                "w-full flex items-start gap-3 p-3 rounded-md transition-colors text-left",
-                                "hover:bg-accent",
-                                selectedModel === model.id && "bg-accent"
-                              )}
-                            >
-                              <div className="mt-0.5">
-                                <span className={model.color}>
-                                  {model.icon}
-                                </span>
-                              </div>
-                              <div className="flex-1 space-y-1">
-                                <div className="flex items-center gap-2">
-                                  <span className="font-medium text-sm">{model.name}</span>
-                                  {model.highCost && (
-                                    <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-600 dark:text-amber-400">HIGH COST</span>
-                                  )}
-                                </div>
-                                <div className="text-xs text-muted-foreground">
-                                  {model.description}
-                                </div>
-                              </div>
-                            </button>
-                          ))}
-                        </div>
+                        <ModelPickerContent
+                          selectedModel={selectedModel}
+                          onSelect={handleModelSelect}
+                        />
                       }
                       open={modelPickerOpen}
                       onOpenChange={setModelPickerOpen}
                       align="start"
                       side="top"
+                      className="p-0"
                     />
                   </div>
 
@@ -1413,41 +1437,16 @@ const FloatingPromptInputInner = (
                       </Tooltip>
                   }
                 content={
-                  <div className="w-[300px] p-1">
-                    {MODELS.map((model) => (
-                      <button
-                        key={model.id}
-                        onClick={() => handleModelSelect(model.id)}
-                        className={cn(
-                          "w-full flex items-start gap-3 p-3 rounded-md transition-colors text-left",
-                          "hover:bg-accent",
-                          selectedModel === model.id && "bg-accent"
-                        )}
-                      >
-                        <div className="mt-0.5">
-                          <span className={model.color}>
-                            {model.icon}
-                          </span>
-                        </div>
-                        <div className="flex-1 space-y-1">
-                          <div className="flex items-center gap-2">
-                            <span className="font-medium text-sm">{model.name}</span>
-                            {model.highCost && (
-                              <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-600 dark:text-amber-400">HIGH COST</span>
-                            )}
-                          </div>
-                          <div className="text-xs text-muted-foreground">
-                            {model.description}
-                          </div>
-                        </div>
-                      </button>
-                    ))}
-                  </div>
+                  <ModelPickerContent
+                    selectedModel={selectedModel}
+                    onSelect={handleModelSelect}
+                  />
                 }
                 open={modelPickerOpen}
                 onOpenChange={setModelPickerOpen}
                 align="start"
                 side="top"
+                className="p-0"
               />
 
                 <Popover
