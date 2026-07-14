@@ -1519,7 +1519,7 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
 
   return (
     <TooltipProvider>
-      <div className={cn("flex flex-col h-full bg-background", className)}>
+      <div className={cn("relative flex flex-col h-full bg-background", className)}>
         <div className="w-full h-full flex flex-col">
 
         {/* Main Content Area */}
@@ -1768,7 +1768,7 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
           )}
 
           <div className={cn(
-            "fixed bottom-0 left-0 right-0 transition-all duration-300 z-50",
+            "absolute bottom-0 left-0 right-0 transition-all duration-300 z-50",
             showTimeline && "sm:right-96"
           )}>
             <FloatingPromptInput
