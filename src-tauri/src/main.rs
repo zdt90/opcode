@@ -64,8 +64,11 @@ fn clamp_window_to_monitor(window: &tauri::WebviewWindow) {
         Ok(Some(m)) => m,
         _ => return,
     };
-    let m_size = monitor.size();
-    let m_pos = monitor.position();
+    // The work area excludes the menu bar and Dock, so the resize handle stays
+    // reachable after moving to a display with a smaller resolution.
+    let work_area = monitor.work_area();
+    let m_size = work_area.size;
+    let m_pos = work_area.position;
 
     let win_size = match window.outer_size() {
         Ok(s) => s,
@@ -226,6 +229,8 @@ fn main() {
             // Keep the window within the current monitor's bounds (e.g. when the
             // screen resolution changes) so it never ends up off-screen.
             if let Some(main_window) = app.get_webview_window("main") {
+                clamp_window_to_monitor(&main_window);
+
                 let win_for_event = main_window.clone();
                 main_window.on_window_event(move |event| {
                     use tauri::WindowEvent;
@@ -234,6 +239,7 @@ fn main() {
                         WindowEvent::Resized(_)
                             | WindowEvent::Moved(_)
                             | WindowEvent::ScaleFactorChanged { .. }
+                            | WindowEvent::Focused(true)
                     ) {
                         clamp_window_to_monitor(&win_for_event);
                     }
