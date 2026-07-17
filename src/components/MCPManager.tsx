@@ -4,7 +4,7 @@ import { AlertCircle, Loader2 } from "lucide-react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Card } from "@/components/ui/card";
 import { Toast, ToastContainer } from "@/components/ui/toast";
-import { api, type MCPServer } from "@/lib/api";
+import { api, type MCPLoginResult, type MCPServer } from "@/lib/api";
 import { MCPServerList } from "./MCPServerList";
 import { MCPAddServer } from "./MCPAddServer";
 import { MCPImportExport } from "./MCPImportExport";
@@ -152,6 +152,27 @@ export const MCPManager: React.FC<MCPManagerProps> = ({
                     loading={false}
                     onServerRemoved={handleServerRemoved}
                     onRefresh={loadServers}
+                    onServerAuthenticated={(name) => {
+                      setToast({ message: `Authentication completed for ${name}`, type: "success" });
+                    }}
+                    onAuthenticationError={(name, message) => {
+                      setToast({
+                        message: message
+                          ? `Authentication failed for ${name}: ${message}`
+                          : `Authentication failed for ${name}`,
+                        type: "error",
+                      });
+                    }}
+                    onServersAuthenticated={(results: MCPLoginResult[]) => {
+                      const succeeded = results.filter((result) => result.success).length;
+                      const failed = results.length - succeeded;
+                      setToast({
+                        message: failed === 0
+                          ? `Authentication completed for ${succeeded} server${succeeded === 1 ? "" : "s"}`
+                          : `Authenticated ${succeeded}; ${failed} server${failed === 1 ? " needs" : "s need"} attention`,
+                        type: failed === 0 ? "success" : "error",
+                      });
+                    }}
                   />
                 </Card>
               </TabsContent>
@@ -192,4 +213,4 @@ export const MCPManager: React.FC<MCPManagerProps> = ({
       </ToastContainer>
     </div>
   );
-}; 
+};

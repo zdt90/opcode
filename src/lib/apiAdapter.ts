@@ -223,6 +223,8 @@ function mapCommandToEndpoint(command: string, _params?: any): string {
     'mcp_add': '/api/mcp/servers',
     'mcp_list': '/api/mcp/servers',
     'mcp_get': '/api/mcp/servers/{name}',
+    'mcp_login': '/api/mcp/servers/{name}/login',
+    'mcp_login_all': '/api/mcp/servers/login-all',
     'mcp_remove': '/api/mcp/servers/{name}',
     'mcp_add_json': '/api/mcp/servers/json',
     'mcp_add_from_claude_desktop': '/api/mcp/import/claude-desktop',
