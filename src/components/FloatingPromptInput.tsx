@@ -16,6 +16,9 @@ import {
   Crown,
   AlertTriangle,
   Database,
+  Gauge,
+  Hammer,
+  ListTodo,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -34,6 +37,7 @@ import {
   normalizeModelId,
   type ModelId,
 } from "@/lib/claudeModels";
+import type { ClaudeEffort, ClaudePermissionMode } from "@/lib/sessionPromptControlsStore";
 import {
   Dialog,
   DialogContent,
@@ -54,7 +58,13 @@ interface FloatingPromptInputProps {
   /**
    * Callback when prompt is sent
    */
-  onSend: (prompt: string, model: ModelId, use1MContext: boolean) => void;
+  onSend: (
+    prompt: string,
+    model: ModelId,
+    use1MContext: boolean,
+    effort: ClaudeEffort,
+    permissionMode: ClaudePermissionMode,
+  ) => void;
   /**
    * Whether the input is loading
    */
@@ -67,10 +77,14 @@ interface FloatingPromptInputProps {
    * Default model to select
    */
   defaultModel?: ModelId;
+  defaultEffort?: ClaudeEffort;
+  defaultPermissionMode?: ClaudePermissionMode;
   /**
    * Called immediately when the user changes the model selection (before sending).
    */
   onModelChange?: (model: ModelId) => void;
+  onEffortChange?: (effort: ClaudeEffort) => void;
+  onPermissionModeChange?: (mode: ClaudePermissionMode) => void;
   /**
    * Project path for file picker
    */
@@ -115,80 +129,76 @@ export interface FloatingPromptInputRef {
 }
 
 /**
- * Thinking mode type definition
+ * Claude Code execution controls
  */
-type ThinkingMode = "auto" | "think" | "think_hard" | "think_harder" | "ultrathink";
-
-/**
- * Thinking mode configuration
- */
-type ThinkingModeConfig = {
-  id: ThinkingMode;
+type EffortConfig = {
+  id: ClaudeEffort;
   name: string;
   description: string;
-  level: number; // 0-4 for visual indicator
-  phrase?: string; // The phrase to append
+  level: number;
   icon: React.ReactNode;
   color: string;
   shortName: string;
 };
 
-const THINKING_MODES: ThinkingModeConfig[] = [
+const EFFORT_LEVELS: EffortConfig[] = [
   {
     id: "auto",
     name: "Auto",
-    description: "Let Claude decide",
+    description: "Use the model default",
     level: 0,
-    icon: <Sparkles className="h-3.5 w-3.5" />,
+    icon: <Lightbulb className="h-3.5 w-3.5" />,
     color: "text-muted-foreground",
     shortName: "A"
   },
   {
-    id: "think",
-    name: "Think",
-    description: "Basic reasoning",
+    id: "low",
+    name: "Low",
+    description: "Faster, lower-cost reasoning",
     level: 1,
-    phrase: "think",
-    icon: <Lightbulb className="h-3.5 w-3.5" />,
+    icon: <Gauge className="h-3.5 w-3.5" />,
     color: "text-primary",
-    shortName: "T"
+    shortName: "L"
   },
   {
-    id: "think_hard",
-    name: "Think Hard",
-    description: "Deeper analysis",
+    id: "medium",
+    name: "Medium",
+    description: "Balanced reasoning",
     level: 2,
-    phrase: "think hard",
     icon: <Brain className="h-3.5 w-3.5" />,
     color: "text-primary",
-    shortName: "T+"
+    shortName: "M"
   },
   {
-    id: "think_harder",
-    name: "Think Harder",
-    description: "Extensive reasoning",
+    id: "high",
+    name: "High",
+    description: "Deeper reasoning for complex work",
     level: 3,
-    phrase: "think harder",
     icon: <Cpu className="h-3.5 w-3.5" />,
     color: "text-primary",
-    shortName: "T++"
+    shortName: "H"
   },
   {
-    id: "ultrathink",
-    name: "Ultrathink",
-    description: "Maximum computation",
+    id: "xhigh",
+    name: "Extra High",
+    description: "Best results on supported models",
     level: 4,
-    phrase: "ultrathink",
     icon: <Rocket className="h-3.5 w-3.5" />,
     color: "text-primary",
-    shortName: "Ultra"
+    shortName: "X"
+  },
+  {
+    id: "max",
+    name: "Max",
+    description: "Maximum reasoning without a token constraint",
+    level: 5,
+    icon: <Crown className="h-3.5 w-3.5" />,
+    color: "text-amber-500",
+    shortName: "M+"
   }
 ];
 
-/**
- * ThinkingModeIndicator component - Shows visual indicator bars for thinking level
- */
-const ThinkingModeIndicator: React.FC<{ level: number; color?: string }> = ({ level, color: _color }) => {
+const EffortIndicator: React.FC<{ level: number }> = ({ level }) => {
   const getBarColor = (barIndex: number) => {
     if (barIndex > level) return "bg-muted";
     return "bg-primary";
@@ -196,7 +206,7 @@ const ThinkingModeIndicator: React.FC<{ level: number; color?: string }> = ({ le
   
   return (
     <div className="flex items-center gap-0.5">
-      {[1, 2, 3, 4].map((i) => (
+      {[1, 2, 3, 4, 5].map((i) => (
         <div
           key={i}
           className={cn(
@@ -209,6 +219,80 @@ const ThinkingModeIndicator: React.FC<{ level: number; color?: string }> = ({ le
     </div>
   );
 };
+
+const PERMISSION_MODES: Array<{
+  id: ClaudePermissionMode;
+  name: string;
+  description: string;
+  shortName: string;
+  icon: React.ReactNode;
+}> = [
+  {
+    id: "default",
+    name: "Build",
+    description: "Claude can make changes",
+    shortName: "B",
+    icon: <Hammer className="h-3.5 w-3.5" />,
+  },
+  {
+    id: "plan",
+    name: "Plan",
+    description: "Explore and propose changes without editing",
+    shortName: "P",
+    icon: <ListTodo className="h-3.5 w-3.5" />,
+  },
+];
+
+const EffortPickerContent: React.FC<{
+  selected: ClaudeEffort;
+  onSelect: (effort: ClaudeEffort) => void;
+}> = ({ selected, onSelect }) => (
+  <div className="w-[280px] p-1">
+    {EFFORT_LEVELS.map((effort) => (
+      <button
+        key={effort.id}
+        onClick={() => onSelect(effort.id)}
+        className={cn(
+          "flex w-full items-start gap-3 rounded-md p-3 text-left transition-colors hover:bg-accent",
+          selected === effort.id && "bg-accent",
+        )}
+      >
+        <span className={cn("mt-0.5", effort.color)}>{effort.icon}</span>
+        <div className="flex-1 space-y-1">
+          <div className="text-sm font-medium">{effort.name}</div>
+          <div className="text-xs text-muted-foreground">{effort.description}</div>
+        </div>
+        <EffortIndicator level={effort.level} />
+      </button>
+    ))}
+  </div>
+);
+
+const PermissionModePickerContent: React.FC<{
+  selected: ClaudePermissionMode;
+  onSelect: (mode: ClaudePermissionMode) => void;
+}> = ({ selected, onSelect }) => (
+  <div className="w-[260px] p-1">
+    {PERMISSION_MODES.map((mode) => (
+      <button
+        key={mode.id}
+        onClick={() => onSelect(mode.id)}
+        className={cn(
+          "flex w-full items-start gap-3 rounded-md p-3 text-left transition-colors hover:bg-accent",
+          selected === mode.id && "bg-accent",
+        )}
+      >
+        <span className={cn("mt-0.5", mode.id === "plan" ? "text-primary" : "text-muted-foreground")}>
+          {mode.icon}
+        </span>
+        <div className="space-y-1">
+          <div className="text-sm font-medium">{mode.name}</div>
+          <div className="text-xs text-muted-foreground">{mode.description}</div>
+        </div>
+      </button>
+    ))}
+  </div>
+);
 
 const MODEL_ICONS: Record<ModelId, React.ReactNode> = {
   "claude-sonnet-4-6": <Zap className="h-3.5 w-3.5" />,
@@ -314,6 +398,8 @@ const FloatingPromptInputInner = (
     isLoading = false,
     disabled = false,
     defaultModel = DEFAULT_MODEL_ID,
+    defaultEffort = "auto",
+    defaultPermissionMode = "default",
     projectPath,
     className,
     onCancel,
@@ -323,6 +409,8 @@ const FloatingPromptInputInner = (
     onDraftChange,
     onHeightChange,
     onModelChange,
+    onEffortChange,
+    onPermissionModeChange,
   }: FloatingPromptInputProps,
   ref: React.Ref<FloatingPromptInputRef>,
 ) => {
@@ -350,12 +438,14 @@ const FloatingPromptInputInner = (
   }, []);
 
   const [selectedModel, setSelectedModel] = useState<ModelId>(() => normalizeModelId(defaultModel));
-  const [selectedThinkingMode, setSelectedThinkingMode] = useState<ThinkingMode>("auto");
+  const [selectedEffort, setSelectedEffort] = useState<ClaudeEffort>(defaultEffort);
+  const [selectedPermissionMode, setSelectedPermissionMode] = useState<ClaudePermissionMode>(defaultPermissionMode);
   const [use1MContext, setUse1MContext] = useState(false);
   const [pendingHighCostAction, setPendingHighCostAction] = useState<null | ModelId | "1m-context">(null);
   const [isExpanded, setIsExpanded] = useState(false);
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
-  const [thinkingModePickerOpen, setThinkingModePickerOpen] = useState(false);
+  const [effortPickerOpen, setEffortPickerOpen] = useState(false);
+  const [permissionModePickerOpen, setPermissionModePickerOpen] = useState(false);
   const [showFilePicker, setShowFilePicker] = useState(false);
   const [filePickerQuery, setFilePickerQuery] = useState("");
   const [showSlashCommandPicker, setShowSlashCommandPicker] = useState(false);
@@ -380,9 +470,15 @@ const FloatingPromptInputInner = (
 
   const onModelChangeRef = useRef(onModelChange);
   useEffect(() => { onModelChangeRef.current = onModelChange; }, [onModelChange]);
+  const onEffortChangeRef = useRef(onEffortChange);
+  useEffect(() => { onEffortChangeRef.current = onEffortChange; }, [onEffortChange]);
+  const onPermissionModeChangeRef = useRef(onPermissionModeChange);
+  useEffect(() => { onPermissionModeChangeRef.current = onPermissionModeChange; }, [onPermissionModeChange]);
   useEffect(() => {
     setSelectedModel(normalizeModelId(defaultModel));
   }, [defaultModel]);
+  useEffect(() => { setSelectedEffort(defaultEffort); }, [defaultEffort]);
+  useEffect(() => { setSelectedPermissionMode(defaultPermissionMode); }, [defaultPermissionMode]);
 
   // Expose a method to add images programmatically
   React.useImperativeHandle(
@@ -923,15 +1019,7 @@ const FloatingPromptInputInner = (
     }
 
     if (prompt.trim() && !disabled) {
-      let finalPrompt = prompt.trim();
-
-      // Append thinking phrase if not auto mode
-      const thinkingMode = THINKING_MODES.find(m => m.id === selectedThinkingMode);
-      if (thinkingMode && thinkingMode.phrase) {
-        finalPrompt = `${finalPrompt}.\n\n${thinkingMode.phrase}.`;
-      }
-
-      onSend(finalPrompt, selectedModel, use1MContext);
+      onSend(prompt.trim(), selectedModel, use1MContext, selectedEffort, selectedPermissionMode);
       setPrompt("");
       setEmbeddedImages([]);
       setTextareaHeight(48); // Reset height after sending
@@ -1254,64 +1342,64 @@ const FloatingPromptInputInner = (
                   </div>
 
                   <div className="flex items-center gap-2">
-                    <span className="text-xs text-muted-foreground">Thinking:</span>
+                    <span className="text-xs text-muted-foreground">Effort:</span>
                     <Popover
                       trigger={
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <Button
-                              variant="outline"
-                                size="sm"
-                                onClick={() => setThinkingModePickerOpen(!thinkingModePickerOpen)}
-                                className="gap-2"
-                              >
-                                <span className={THINKING_MODES.find(m => m.id === selectedThinkingMode)?.color}>
-                                  {THINKING_MODES.find(m => m.id === selectedThinkingMode)?.icon}
-                                </span>
-                                <ThinkingModeIndicator 
-                                  level={THINKING_MODES.find(m => m.id === selectedThinkingMode)?.level || 0} 
-                                />
-                              </Button>
-                            </TooltipTrigger>
-                            <TooltipContent>
-                              <p className="font-medium">{THINKING_MODES.find(m => m.id === selectedThinkingMode)?.name || "Auto"}</p>
-                              <p className="text-xs text-muted-foreground">{THINKING_MODES.find(m => m.id === selectedThinkingMode)?.description}</p>
-                            </TooltipContent>
-                          </Tooltip>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setEffortPickerOpen(!effortPickerOpen)}
+                          className="gap-2"
+                        >
+                          <span className={EFFORT_LEVELS.find((effort) => effort.id === selectedEffort)?.color}>
+                            {EFFORT_LEVELS.find((effort) => effort.id === selectedEffort)?.icon}
+                          </span>
+                          {EFFORT_LEVELS.find((effort) => effort.id === selectedEffort)?.name}
+                        </Button>
                       }
                       content={
-                        <div className="w-[280px] p-1">
-                          {THINKING_MODES.map((mode) => (
-                            <button
-                              key={mode.id}
-                              onClick={() => {
-                                setSelectedThinkingMode(mode.id);
-                                setThinkingModePickerOpen(false);
-                              }}
-                              className={cn(
-                                "w-full flex items-start gap-3 p-3 rounded-md transition-colors text-left",
-                                "hover:bg-accent",
-                                selectedThinkingMode === mode.id && "bg-accent"
-                              )}
-                            >
-                              <span className={cn("mt-0.5", mode.color)}>
-                                {mode.icon}
-                              </span>
-                              <div className="flex-1 space-y-1">
-                                <div className="font-medium text-sm">
-                                  {mode.name}
-                                </div>
-                                <div className="text-xs text-muted-foreground">
-                                  {mode.description}
-                                </div>
-                              </div>
-                              <ThinkingModeIndicator level={mode.level} />
-                            </button>
-                          ))}
-                        </div>
+                        <EffortPickerContent
+                          selected={selectedEffort}
+                          onSelect={(effort) => {
+                            setSelectedEffort(effort);
+                            onEffortChangeRef.current?.(effort);
+                            setEffortPickerOpen(false);
+                          }}
+                        />
                       }
-                      open={thinkingModePickerOpen}
-                      onOpenChange={setThinkingModePickerOpen}
+                      open={effortPickerOpen}
+                      onOpenChange={setEffortPickerOpen}
+                      align="start"
+                      side="top"
+                    />
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-muted-foreground">Mode:</span>
+                    <Popover
+                      trigger={
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setPermissionModePickerOpen(!permissionModePickerOpen)}
+                          className="gap-2"
+                        >
+                          {PERMISSION_MODES.find((mode) => mode.id === selectedPermissionMode)?.icon}
+                          {PERMISSION_MODES.find((mode) => mode.id === selectedPermissionMode)?.name}
+                        </Button>
+                      }
+                      content={
+                        <PermissionModePickerContent
+                          selected={selectedPermissionMode}
+                          onSelect={(mode) => {
+                            setSelectedPermissionMode(mode);
+                            onPermissionModeChangeRef.current?.(mode);
+                            setPermissionModePickerOpen(false);
+                          }}
+                        />
+                      }
+                      open={permissionModePickerOpen}
+                      onOpenChange={setPermissionModePickerOpen}
                       align="start"
                       side="top"
                     />
@@ -1392,7 +1480,7 @@ const FloatingPromptInputInner = (
         onDragOver={handleDrag}
         onDrop={handleDrop}
       >
-        <div className="container mx-auto">
+        <div className="w-full">
           {/* Image previews */}
           {embeddedImages.length > 0 && (
             <ImagePreview
@@ -1404,7 +1492,7 @@ const FloatingPromptInputInner = (
 
           <div className="p-3">
             <div className="flex items-end gap-2">
-              {/* Model & Thinking Mode Selectors - Left side, fixed at bottom */}
+              {/* Model, effort, and permission mode selectors */}
               <div className="flex items-center gap-1 shrink-0 mb-1">
                 <Popover
                   trigger={
@@ -1463,55 +1551,78 @@ const FloatingPromptInputInner = (
                               disabled={disabled}
                               className="h-9 px-2 hover:bg-accent/50 gap-1"
                             >
-                              <span className={THINKING_MODES.find(m => m.id === selectedThinkingMode)?.color}>
-                                {THINKING_MODES.find(m => m.id === selectedThinkingMode)?.icon}
+                              <span className={EFFORT_LEVELS.find((effort) => effort.id === selectedEffort)?.color}>
+                                {EFFORT_LEVELS.find((effort) => effort.id === selectedEffort)?.icon}
                               </span>
                               <span className="text-[10px] font-semibold opacity-70">
-                                {THINKING_MODES.find(m => m.id === selectedThinkingMode)?.shortName}
+                                {EFFORT_LEVELS.find((effort) => effort.id === selectedEffort)?.shortName}
                               </span>
                               <ChevronUp className="h-3 w-3 ml-0.5 opacity-50" />
                             </Button>
                           </motion.div>
                         </TooltipTrigger>
                         <TooltipContent side="top">
-                          <p className="text-xs font-medium">Thinking: {THINKING_MODES.find(m => m.id === selectedThinkingMode)?.name || "Auto"}</p>
-                          <p className="text-xs text-muted-foreground">{THINKING_MODES.find(m => m.id === selectedThinkingMode)?.description}</p>
+                          <p className="text-xs font-medium">Effort: {EFFORT_LEVELS.find((effort) => effort.id === selectedEffort)?.name}</p>
+                          <p className="text-xs text-muted-foreground">{EFFORT_LEVELS.find((effort) => effort.id === selectedEffort)?.description}</p>
                         </TooltipContent>
                       </Tooltip>
                   }
                 content={
-                  <div className="w-[280px] p-1">
-                    {THINKING_MODES.map((mode) => (
-                      <button
-                        key={mode.id}
-                        onClick={() => {
-                          setSelectedThinkingMode(mode.id);
-                          setThinkingModePickerOpen(false);
-                        }}
-                        className={cn(
-                          "w-full flex items-start gap-3 p-3 rounded-md transition-colors text-left",
-                          "hover:bg-accent",
-                          selectedThinkingMode === mode.id && "bg-accent"
-                        )}
-                      >
-                        <span className={cn("mt-0.5", mode.color)}>
-                          {mode.icon}
-                        </span>
-                        <div className="flex-1 space-y-1">
-                          <div className="font-medium text-sm">
-                            {mode.name}
-                          </div>
-                          <div className="text-xs text-muted-foreground">
-                            {mode.description}
-                          </div>
-                        </div>
-                        <ThinkingModeIndicator level={mode.level} />
-                      </button>
-                    ))}
-                  </div>
+                  <EffortPickerContent
+                    selected={selectedEffort}
+                    onSelect={(effort) => {
+                      setSelectedEffort(effort);
+                      onEffortChangeRef.current?.(effort);
+                      setEffortPickerOpen(false);
+                    }}
+                  />
                 }
-                open={thinkingModePickerOpen}
-                onOpenChange={setThinkingModePickerOpen}
+                open={effortPickerOpen}
+                onOpenChange={setEffortPickerOpen}
+                align="start"
+                side="top"
+              />
+
+              <Popover
+                trigger={
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <motion.div whileTap={{ scale: 0.97 }} transition={{ duration: 0.15 }}>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          disabled={disabled || isLoading}
+                          className={cn(
+                            "h-9 gap-1 px-2 hover:bg-accent/50",
+                            selectedPermissionMode === "plan" && "text-primary",
+                          )}
+                        >
+                          {PERMISSION_MODES.find((mode) => mode.id === selectedPermissionMode)?.icon}
+                          <span className="text-[10px] font-semibold opacity-70">
+                            {PERMISSION_MODES.find((mode) => mode.id === selectedPermissionMode)?.shortName}
+                          </span>
+                          <ChevronUp className="ml-0.5 h-3 w-3 opacity-50" />
+                        </Button>
+                      </motion.div>
+                    </TooltipTrigger>
+                    <TooltipContent side="top">
+                      <p className="text-xs font-medium">Mode: {PERMISSION_MODES.find((mode) => mode.id === selectedPermissionMode)?.name}</p>
+                      <p className="text-xs text-muted-foreground">{PERMISSION_MODES.find((mode) => mode.id === selectedPermissionMode)?.description}</p>
+                    </TooltipContent>
+                  </Tooltip>
+                }
+                content={
+                  <PermissionModePickerContent
+                    selected={selectedPermissionMode}
+                    onSelect={(mode) => {
+                      setSelectedPermissionMode(mode);
+                      onPermissionModeChangeRef.current?.(mode);
+                      setPermissionModePickerOpen(false);
+                    }}
+                  />
+                }
+                open={permissionModePickerOpen}
+                onOpenChange={setPermissionModePickerOpen}
                 align="start"
                 side="top"
               />
