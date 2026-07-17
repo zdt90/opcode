@@ -1031,24 +1031,49 @@ export const api = {
    * Executes a new interactive Claude Code session with streaming output.
    * @param tabId - The frontend Tab.id; used to route events to the correct tab.
    */
-  async executeClaudeCode(tabId: string, projectPath: string, prompt: string, model: string, use1MContext: boolean = false): Promise<void> {
-    return apiCall("execute_claude_code", { tabId, projectPath, prompt, model, use1MContext });
+  async executeClaudeCode(
+    tabId: string,
+    projectPath: string,
+    prompt: string,
+    model: string,
+    use1MContext: boolean = false,
+    effort: string = "auto",
+    permissionMode: string = "default",
+  ): Promise<void> {
+    return apiCall("execute_claude_code", { tabId, projectPath, prompt, model, use1MContext, effort, permissionMode });
   },
 
   /**
    * Continues an existing Claude Code conversation with streaming output.
    * @param tabId - The frontend Tab.id; used to route events to the correct tab.
    */
-  async continueClaudeCode(tabId: string, projectPath: string, prompt: string, model: string, use1MContext: boolean = false): Promise<void> {
-    return apiCall("continue_claude_code", { tabId, projectPath, prompt, model, use1MContext });
+  async continueClaudeCode(
+    tabId: string,
+    projectPath: string,
+    prompt: string,
+    model: string,
+    use1MContext: boolean = false,
+    effort: string = "auto",
+    permissionMode: string = "default",
+  ): Promise<void> {
+    return apiCall("continue_claude_code", { tabId, projectPath, prompt, model, use1MContext, effort, permissionMode });
   },
 
   /**
    * Resumes an existing Claude Code session by ID with streaming output.
    * @param tabId - The frontend Tab.id; used to route events to the correct tab.
    */
-  async resumeClaudeCode(tabId: string, projectPath: string, sessionId: string, prompt: string, model: string, use1MContext: boolean = false): Promise<void> {
-    return apiCall("resume_claude_code", { tabId, projectPath, sessionId, prompt, model, use1MContext });
+  async resumeClaudeCode(
+    tabId: string,
+    projectPath: string,
+    sessionId: string,
+    prompt: string,
+    model: string,
+    use1MContext: boolean = false,
+    effort: string = "auto",
+    permissionMode: string = "default",
+  ): Promise<void> {
+    return apiCall("resume_claude_code", { tabId, projectPath, sessionId, prompt, model, use1MContext, effort, permissionMode });
   },
 
   /**

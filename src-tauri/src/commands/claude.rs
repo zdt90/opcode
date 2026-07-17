@@ -968,20 +968,35 @@ fn read_skip_permissions(db: &crate::commands::agents::AgentDb) -> bool {
     .unwrap_or(true)
 }
 
-/// Build the common permission flags for a Claude CLI invocation.
-/// When `skip` is true we use both --dangerously-skip-permissions (skips
-/// built-in tool checks) and --permission-mode bypassPermissions (skips MCP
-/// tool permission prompts that are not covered by the former flag).
-fn permission_args(skip: bool) -> Vec<String> {
-    if skip {
-        vec![
+/// Build permission-mode and effort flags for a Claude CLI invocation.
+/// Plan mode always remains read-only, even when the app normally bypasses
+/// permission prompts for build turns.
+fn session_control_args(
+    skip: bool,
+    permission_mode: &str,
+    effort: &str,
+) -> Result<Vec<String>, String> {
+    let mut args = match permission_mode {
+        "plan" => vec!["--permission-mode".to_string(), "plan".to_string()],
+        "default" if skip => vec![
             "--dangerously-skip-permissions".to_string(),
             "--permission-mode".to_string(),
             "bypassPermissions".to_string(),
-        ]
-    } else {
-        vec![]
+        ],
+        "default" => vec![],
+        mode => return Err(format!("Unsupported permission mode: {mode}")),
+    };
+
+    match effort {
+        "auto" => {}
+        "low" | "medium" | "high" | "xhigh" | "max" => {
+            args.push("--effort".to_string());
+            args.push(effort.to_string());
+        }
+        level => return Err(format!("Unsupported effort level: {level}")),
     }
+
+    Ok(args)
 }
 
 /// Overrides the CLAUDE_CODE_DISABLE_1M_CONTEXT environment variable for a command.
@@ -1003,12 +1018,16 @@ pub async fn execute_claude_code(
     prompt: String,
     model: String,
     use_1_m_context: bool,
+    effort: String,
+    permission_mode: String,
 ) -> Result<(), String> {
     log::info!(
-        "Starting new Claude Code session in: {} with model: {} (1M context: {}, tab: {})",
+        "Starting new Claude Code session in: {} with model: {} (1M context: {}, effort: {}, mode: {}, tab: {})",
         project_path,
         model,
         use_1_m_context,
+        effort,
+        permission_mode,
         tab_id
     );
 
@@ -1025,7 +1044,7 @@ pub async fn execute_claude_code(
         "stream-json".to_string(),
         "--verbose".to_string(),
     ];
-    args.extend(permission_args(skip));
+    args.extend(session_control_args(skip, &permission_mode, &effort)?);
 
     let mut cmd = create_system_command(&claude_path, args, &project_path);
     apply_1m_context_env(&mut cmd, use_1_m_context);
@@ -1042,12 +1061,16 @@ pub async fn continue_claude_code(
     prompt: String,
     model: String,
     use_1_m_context: bool,
+    effort: String,
+    permission_mode: String,
 ) -> Result<(), String> {
     log::info!(
-        "Continuing Claude Code conversation in: {} with model: {} (1M context: {}, tab: {})",
+        "Continuing Claude Code conversation in: {} with model: {} (1M context: {}, effort: {}, mode: {}, tab: {})",
         project_path,
         model,
         use_1_m_context,
+        effort,
+        permission_mode,
         tab_id
     );
 
@@ -1065,7 +1088,7 @@ pub async fn continue_claude_code(
         "stream-json".to_string(),
         "--verbose".to_string(),
     ];
-    args.extend(permission_args(skip));
+    args.extend(session_control_args(skip, &permission_mode, &effort)?);
 
     let mut cmd = create_system_command(&claude_path, args, &project_path);
     apply_1m_context_env(&mut cmd, use_1_m_context);
@@ -1083,13 +1106,17 @@ pub async fn resume_claude_code(
     prompt: String,
     model: String,
     use_1_m_context: bool,
+    effort: String,
+    permission_mode: String,
 ) -> Result<(), String> {
     log::info!(
-        "Resuming Claude Code session: {} in: {} with model: {} (1M context: {}, tab: {})",
+        "Resuming Claude Code session: {} in: {} with model: {} (1M context: {}, effort: {}, mode: {}, tab: {})",
         session_id,
         project_path,
         model,
         use_1_m_context,
+        effort,
+        permission_mode,
         tab_id
     );
 
@@ -1108,7 +1135,7 @@ pub async fn resume_claude_code(
         "stream-json".to_string(),
         "--verbose".to_string(),
     ];
-    args.extend(permission_args(skip));
+    args.extend(session_control_args(skip, &permission_mode, &effort)?);
 
     let mut cmd = create_system_command(&claude_path, args, &project_path);
     apply_1m_context_env(&mut cmd, use_1_m_context);
@@ -2745,6 +2772,34 @@ mod tests {
     use super::*;
     use std::io::Write;
     use tempfile::TempDir;
+
+    #[test]
+    fn test_session_control_args_uses_model_default_for_auto_effort() {
+        let args = session_control_args(false, "default", "auto").unwrap();
+        assert!(args.is_empty());
+    }
+
+    #[test]
+    fn test_session_control_args_adds_effort() {
+        let args = session_control_args(false, "default", "high").unwrap();
+        assert_eq!(args, vec!["--effort", "high"]);
+    }
+
+    #[test]
+    fn test_session_control_args_plan_overrides_bypass_permissions() {
+        let args = session_control_args(true, "plan", "max").unwrap();
+        assert_eq!(
+            args,
+            vec!["--permission-mode", "plan", "--effort", "max"]
+        );
+        assert!(!args.contains(&"--dangerously-skip-permissions".to_string()));
+    }
+
+    #[test]
+    fn test_session_control_args_rejects_unknown_values() {
+        assert!(session_control_args(false, "edit", "auto").is_err());
+        assert!(session_control_args(false, "default", "extreme").is_err());
+    }
 
     /// Helper function to create a test session file
     fn create_test_session_file(

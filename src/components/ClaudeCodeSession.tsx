@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
+import { createPortal } from "react-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { 
   Copy,
@@ -45,8 +46,16 @@ const listen = tauriListenImport || ((eventName: string, callback: (event: any) 
   });
 });
 import { StreamMessage } from "./StreamMessage";
-import { FloatingPromptInput, type FloatingPromptInputRef } from "./FloatingPromptInput";
+import {
+  FloatingPromptInput,
+  type FloatingPromptInputRef,
+} from "./FloatingPromptInput";
 import { sessionModelStore } from "@/lib/sessionModelStore";
+import {
+  sessionPromptControlsStore,
+  type ClaudeEffort,
+  type ClaudePermissionMode,
+} from "@/lib/sessionPromptControlsStore";
 import {
   DEFAULT_MODEL_ID,
   DEFAULT_MODEL_SETTING_KEY,
@@ -150,6 +159,14 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
   const [totalTokens, setTotalTokens] = useState(0);
   const [extractedSessionInfo, setExtractedSessionInfo] = useState<{ sessionId: string; projectId: string } | null>(null);
   const [claudeSessionId, setClaudeSessionId] = useState<string | null>(null);
+  const controlsSessionId = session?.id ?? claudeSessionId;
+  const currentSessionControls = controlsSessionId
+    ? sessionPromptControlsStore.get(controlsSessionId)
+    : { effort: "auto" as const, permissionMode: "default" as const };
+  const lastPromptOptionsRef = useRef({
+    model: effectiveDefaultModel,
+    ...currentSessionControls,
+  });
   const [showTimeline, setShowTimeline] = useState(false);
   const [timelineVersion, setTimelineVersion] = useState(0);
   const [showSettings, setShowSettings] = useState(false);
@@ -174,7 +191,14 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
   const [forkSessionName, setForkSessionName] = useState("");
   
   // Queued prompts state
-  const [queuedPrompts, setQueuedPrompts] = useState<Array<{ id: string; prompt: string; model: ModelId; use1MContext: boolean }>>([]);
+  const [queuedPrompts, setQueuedPrompts] = useState<Array<{
+    id: string;
+    prompt: string;
+    model: ModelId;
+    use1MContext: boolean;
+    effort: ClaudeEffort;
+    permissionMode: ClaudePermissionMode;
+  }>>([]);
   
   // New state for preview feature
   const [showPreview, setShowPreview] = useState(false);
@@ -200,7 +224,14 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
   const unlistenRefs = useRef<UnlistenFn[]>([]);
   const hasActiveSessionRef = useRef(false);
   const floatingPromptRef = useRef<FloatingPromptInputRef>(null);
-  const queuedPromptsRef = useRef<Array<{ id: string; prompt: string; model: ModelId; use1MContext: boolean }>>([]);
+  const queuedPromptsRef = useRef<Array<{
+    id: string;
+    prompt: string;
+    model: ModelId;
+    use1MContext: boolean;
+    effort: ClaudeEffort;
+    permissionMode: ClaudePermissionMode;
+  }>>([]);
   const isMountedRef = useRef(true);
   const isListeningRef = useRef(false);
   const sessionStartTime = useRef<number>(Date.now());
@@ -686,8 +717,15 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
 
   // Project path selection handled by parent tab controls
 
-  const handleSendPrompt = async (prompt: string, model: ModelId, use1MContext: boolean = false) => {
-    console.log('[ClaudeCodeSession] handleSendPrompt called with:', { prompt, model, use1MContext, projectPath, claudeSessionId, effectiveSession });
+  const handleSendPrompt = async (
+    prompt: string,
+    model: ModelId,
+    use1MContext: boolean = false,
+    effort: ClaudeEffort = "auto",
+    permissionMode: ClaudePermissionMode = "default",
+  ) => {
+    lastPromptOptionsRef.current = { model, effort, permissionMode };
+    console.log('[ClaudeCodeSession] handleSendPrompt called with:', { prompt, model, use1MContext, effort, permissionMode, projectPath, claudeSessionId, effectiveSession });
     
     if (!projectPath) {
       setError("Please select a project directory first");
@@ -717,6 +755,8 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
           prompt,
           model,
           use1MContext,
+          effort,
+          permissionMode,
         }]);
       }
       return;
@@ -767,6 +807,11 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
                 console.log('[ClaudeCodeSession] Detected session_id from tab-scoped listener:', msg.session_id);
                 currentSessionId = msg.session_id;
                 setClaudeSessionId(msg.session_id);
+                sessionModelStore.set(msg.session_id, lastPromptOptionsRef.current.model);
+                sessionPromptControlsStore.set(msg.session_id, {
+                  effort: lastPromptOptionsRef.current.effort,
+                  permissionMode: lastPromptOptionsRef.current.permissionMode,
+                });
 
                 if (!extractedSessionInfo) {
                   const projectId = projectPath.replace(/[^a-zA-Z0-9]/g, '-');
@@ -976,7 +1021,13 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
             
             // Small delay to ensure UI updates
             setTimeout(() => {
-              handleSendPrompt(nextPrompt.prompt, nextPrompt.model, nextPrompt.use1MContext);
+              handleSendPrompt(
+                nextPrompt.prompt,
+                nextPrompt.model,
+                nextPrompt.use1MContext,
+                nextPrompt.effort,
+                nextPrompt.permissionMode,
+              );
             }, 100);
           }
         };
@@ -1061,13 +1112,30 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
           console.log('[ClaudeCodeSession] Resuming session:', effectiveSession.id, 'in:', resumeProjectPath);
           trackEvent.sessionResumed(effectiveSession.id);
           trackEvent.modelSelected(model);
-          await api.resumeClaudeCode(tabId, resumeProjectPath, effectiveSession.id, prompt, model, use1MContext);
+          await api.resumeClaudeCode(
+            tabId,
+            resumeProjectPath,
+            effectiveSession.id,
+            prompt,
+            model,
+            use1MContext,
+            effort,
+            permissionMode,
+          );
         } else {
           console.log('[ClaudeCodeSession] Starting new session');
           setIsFirstPrompt(false);
           trackEvent.sessionCreated(model, 'prompt_input');
           trackEvent.modelSelected(model);
-          await api.executeClaudeCode(tabId, projectPath, prompt, model, use1MContext);
+          await api.executeClaudeCode(
+            tabId,
+            projectPath,
+            prompt,
+            model,
+            use1MContext,
+            effort,
+            permissionMode,
+          );
         }
       }
     } catch (err) {
@@ -1767,9 +1835,9 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
             </motion.div>
           )}
 
-          <div className={cn(
-            "absolute bottom-0 left-0 right-0 transition-all duration-300 z-50",
-            showTimeline && "sm:right-96"
+          {createPortal(<div className={cn(
+            "fixed bottom-0 left-0 right-0 z-50",
+            !isActive && "hidden",
           )}>
             <FloatingPromptInput
               key={sessionKey}
@@ -1781,9 +1849,32 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
               projectPath={projectPath}
               isActive={isActive}
               defaultModel={effectiveDefaultModel}
+              defaultEffort={currentSessionControls.effort}
+              defaultPermissionMode={currentSessionControls.permissionMode}
               onModelChange={(model) => {
+                lastPromptOptionsRef.current.model = model;
                 const sessionId = effectiveSession?.id ?? claudeSessionId;
                 if (sessionId) sessionModelStore.set(sessionId, model);
+              }}
+              onEffortChange={(effort) => {
+                lastPromptOptionsRef.current.effort = effort;
+                const sessionId = effectiveSession?.id ?? claudeSessionId;
+                if (sessionId) {
+                  sessionPromptControlsStore.set(sessionId, {
+                    effort,
+                    permissionMode: lastPromptOptionsRef.current.permissionMode,
+                  });
+                }
+              }}
+              onPermissionModeChange={(permissionMode) => {
+                lastPromptOptionsRef.current.permissionMode = permissionMode;
+                const sessionId = effectiveSession?.id ?? claudeSessionId;
+                if (sessionId) {
+                  sessionPromptControlsStore.set(sessionId, {
+                    effort: lastPromptOptionsRef.current.effort,
+                    permissionMode,
+                  });
+                }
               }}
               initialPrompt={currentDraft}
               onDraftChange={(draft) => {
@@ -1874,7 +1965,7 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
                 </>
               }
             />
-          </div>
+          </div>, document.body)}
 
           {/* Token Counter - positioned under the Send button */}
           {totalTokens > 0 && (
