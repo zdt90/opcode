@@ -2,7 +2,7 @@ export const DEFAULT_MODEL_SETTING_KEY = "default_model";
 
 export const CLAUDE_MODELS = [
   {
-    id: "global.anthropic.claude-sonnet-4-6",
+    id: "claude-sonnet-4-6",
     name: "Sonnet 4.6",
     family: "Sonnet",
     version: "4.6",
@@ -11,7 +11,7 @@ export const CLAUDE_MODELS = [
     highCost: false,
   },
   {
-    id: "global.anthropic.claude-sonnet-5",
+    id: "claude-sonnet-5",
     name: "Sonnet 5",
     family: "Sonnet",
     version: "5",
@@ -20,7 +20,7 @@ export const CLAUDE_MODELS = [
     highCost: false,
   },
   {
-    id: "global.anthropic.claude-haiku-4-5",
+    id: "claude-haiku-4-5",
     name: "Haiku 4.5",
     family: "Haiku",
     version: "4.5",
@@ -29,7 +29,7 @@ export const CLAUDE_MODELS = [
     highCost: false,
   },
   {
-    id: "global.anthropic.claude-opus-4-6",
+    id: "claude-opus-4-6",
     name: "Opus 4.6",
     family: "Opus",
     version: "4.6",
@@ -38,7 +38,7 @@ export const CLAUDE_MODELS = [
     highCost: false,
   },
   {
-    id: "global.anthropic.claude-opus-4-7",
+    id: "claude-opus-4-7",
     name: "Opus 4.7",
     family: "Opus",
     version: "4.7",
@@ -47,7 +47,7 @@ export const CLAUDE_MODELS = [
     highCost: true,
   },
   {
-    id: "global.anthropic.claude-opus-4-8",
+    id: "claude-opus-4-8",
     name: "Opus 4.8",
     family: "Opus",
     version: "4.8",
@@ -56,7 +56,7 @@ export const CLAUDE_MODELS = [
     highCost: true,
   },
   {
-    id: "global.anthropic.claude-fable-5",
+    id: "claude-fable-5",
     name: "Fable 5",
     family: "Fable",
     version: "5",
@@ -68,15 +68,22 @@ export const CLAUDE_MODELS = [
 
 export type ModelId = (typeof CLAUDE_MODELS)[number]["id"];
 
-export const DEFAULT_MODEL_ID: ModelId = "global.anthropic.claude-sonnet-4-6";
+export const DEFAULT_MODEL_ID: ModelId = "claude-sonnet-4-6";
 
 const MODEL_IDS = new Set<string>(CLAUDE_MODELS.map((model) => model.id));
 
 const LEGACY_MODEL_ALIASES: Record<string, ModelId> = {
-  sonnet: "global.anthropic.claude-sonnet-4-6",
-  opus: "global.anthropic.claude-opus-4-6",
-  haiku: "global.anthropic.claude-haiku-4-5",
-  "opus-4-7": "global.anthropic.claude-opus-4-7",
+  sonnet: "claude-sonnet-4-6",
+  opus: "claude-opus-4-6",
+  haiku: "claude-haiku-4-5",
+  "opus-4-7": "claude-opus-4-7",
+  "global.anthropic.claude-sonnet-4-6": "claude-sonnet-4-6",
+  "global.anthropic.claude-sonnet-5": "claude-sonnet-5",
+  "global.anthropic.claude-haiku-4-5": "claude-haiku-4-5",
+  "global.anthropic.claude-opus-4-6": "claude-opus-4-6",
+  "global.anthropic.claude-opus-4-7": "claude-opus-4-7",
+  "global.anthropic.claude-opus-4-8": "claude-opus-4-8",
+  "global.anthropic.claude-fable-5": "claude-fable-5",
 };
 
 export function normalizeModelId(value?: string | null): ModelId {
