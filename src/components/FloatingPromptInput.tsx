@@ -211,23 +211,23 @@ const ThinkingModeIndicator: React.FC<{ level: number; color?: string }> = ({ le
 };
 
 const MODEL_ICONS: Record<ModelId, React.ReactNode> = {
-  "global.anthropic.claude-sonnet-4-6": <Zap className="h-3.5 w-3.5" />,
-  "global.anthropic.claude-sonnet-5": <Zap className="h-3.5 w-3.5" />,
-  "global.anthropic.claude-haiku-4-5": <Zap className="h-3.5 w-3.5" />,
-  "global.anthropic.claude-opus-4-6": <Sparkles className="h-3.5 w-3.5" />,
-  "global.anthropic.claude-opus-4-7": <Rocket className="h-3.5 w-3.5" />,
-  "global.anthropic.claude-opus-4-8": <Rocket className="h-3.5 w-3.5" />,
-  "global.anthropic.claude-fable-5": <Crown className="h-3.5 w-3.5" />,
+  "claude-sonnet-4-6": <Zap className="h-3.5 w-3.5" />,
+  "claude-sonnet-5": <Zap className="h-3.5 w-3.5" />,
+  "claude-haiku-4-5": <Zap className="h-3.5 w-3.5" />,
+  "claude-opus-4-6": <Sparkles className="h-3.5 w-3.5" />,
+  "claude-opus-4-7": <Rocket className="h-3.5 w-3.5" />,
+  "claude-opus-4-8": <Rocket className="h-3.5 w-3.5" />,
+  "claude-fable-5": <Crown className="h-3.5 w-3.5" />,
 };
 
 const MODEL_COLORS: Record<ModelId, string> = {
-  "global.anthropic.claude-sonnet-4-6": "text-primary",
-  "global.anthropic.claude-sonnet-5": "text-primary",
-  "global.anthropic.claude-haiku-4-5": "text-muted-foreground",
-  "global.anthropic.claude-opus-4-6": "text-primary",
-  "global.anthropic.claude-opus-4-7": "text-amber-500",
-  "global.anthropic.claude-opus-4-8": "text-amber-500",
-  "global.anthropic.claude-fable-5": "text-amber-500",
+  "claude-sonnet-4-6": "text-primary",
+  "claude-sonnet-5": "text-primary",
+  "claude-haiku-4-5": "text-muted-foreground",
+  "claude-opus-4-6": "text-primary",
+  "claude-opus-4-7": "text-amber-500",
+  "claude-opus-4-8": "text-amber-500",
+  "claude-fable-5": "text-amber-500",
 };
 
 const MODELS = CLAUDE_MODELS.map((model) => ({
