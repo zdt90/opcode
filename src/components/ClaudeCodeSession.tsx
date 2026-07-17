@@ -49,6 +49,7 @@ import { StreamMessage } from "./StreamMessage";
 import {
   FloatingPromptInput,
   type FloatingPromptInputRef,
+  type MessageSendMode,
 } from "./FloatingPromptInput";
 import { sessionModelStore } from "@/lib/sessionModelStore";
 import {
@@ -209,6 +210,8 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
   
   // Add collapsed state for queued prompts
   const [queuedPromptsCollapsed, setQueuedPromptsCollapsed] = useState(false);
+  // Each tab owns its send strategy. New tabs start with mid-turn injection.
+  const [sendMode, setSendMode] = useState<MessageSendMode>("inject");
 
   const parentRef = useRef<HTMLDivElement>(null);
 
@@ -717,6 +720,26 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
 
   // Project path selection handled by parent tab controls
 
+  const queuePrompt = (
+    prompt: string,
+    model: ModelId,
+    use1MContext: boolean,
+    effort: ClaudeEffort,
+    permissionMode: ClaudePermissionMode,
+  ) => {
+    setQueuedPrompts((current) => [
+      ...current,
+      {
+        id: `${Date.now()}-${Math.random().toString(36).slice(2, 11)}`,
+        prompt,
+        model,
+        use1MContext,
+        effort,
+        permissionMode,
+      },
+    ]);
+  };
+
   const handleSendPrompt = async (
     prompt: string,
     model: ModelId,
@@ -737,8 +760,13 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
     setIsAtBottom(true);
     setUnreadBelowCount(0);
 
-    // If already loading, inject mid-turn (matching Claude TUI behavior)
+    // While a turn is running, use the strategy selected for this tab.
     if (isLoading) {
+      if (sendMode === "queue") {
+        queuePrompt(prompt, model, use1MContext, effort, permissionMode);
+        return;
+      }
+
       console.log('[ClaudeCodeSession] BUILD v7 - mid-turn inject:', prompt);
       try {
         await apiCall('inject_claude_message', { tabId, message: prompt });
@@ -750,14 +778,7 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
         } as any]);
       } catch (e) {
         console.error('[ClaudeCodeSession] inject failed, queuing instead:', e);
-        setQueuedPrompts(prev => [...prev, {
-          id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-          prompt,
-          model,
-          use1MContext,
-          effort,
-          permissionMode,
-        }]);
+        queuePrompt(prompt, model, use1MContext, effort, permissionMode);
       }
       return;
     }
@@ -1848,6 +1869,8 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
               disabled={!projectPath}
               projectPath={projectPath}
               isActive={isActive}
+              sendMode={sendMode}
+              onSendModeChange={setSendMode}
               defaultModel={effectiveDefaultModel}
               defaultEffort={currentSessionControls.effort}
               defaultPermissionMode={currentSessionControls.permissionMode}

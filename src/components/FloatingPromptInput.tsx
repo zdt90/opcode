@@ -6,6 +6,7 @@ import {
   Maximize2,
   Minimize2,
   ChevronUp,
+  ChevronDown,
   Sparkles,
   Zap,
   Square,
@@ -19,9 +20,17 @@ import {
   Gauge,
   Hammer,
   ListTodo,
+  Clock3,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Popover } from "@/components/ui/popover";
 import { Textarea } from "@/components/ui/textarea";
 import { TooltipProvider, TooltipSimple, Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip-modern";
@@ -54,6 +63,8 @@ import {
 const isTauri = (): boolean =>
   typeof window !== 'undefined' && Boolean((window as any).__TAURI__);
 
+export type MessageSendMode = "inject" | "queue";
+
 interface FloatingPromptInputProps {
   /**
    * Callback when prompt is sent
@@ -85,6 +96,8 @@ interface FloatingPromptInputProps {
   onModelChange?: (model: ModelId) => void;
   onEffortChange?: (effort: ClaudeEffort) => void;
   onPermissionModeChange?: (mode: ClaudePermissionMode) => void;
+  sendMode?: MessageSendMode;
+  onSendModeChange?: (mode: MessageSendMode) => void;
   /**
    * Project path for file picker
    */
@@ -294,6 +307,76 @@ const PermissionModePickerContent: React.FC<{
   </div>
 );
 
+const SEND_MODE_DETAILS: Record<MessageSendMode, { label: string; description: string }> = {
+  inject: {
+    label: "Mid-turn injection",
+    description: "Send to Claude while it is working",
+  },
+  queue: {
+    label: "Queue message",
+    description: "Send after the current turn finishes",
+  },
+};
+
+const SendModeIcon: React.FC<{ mode: MessageSendMode }> = ({ mode }) => {
+  if (mode === "inject") {
+    return <Send className="h-4 w-4" />;
+  }
+
+  return (
+    <span className="relative block h-4 w-4" aria-hidden="true">
+      <Send className="h-4 w-4" />
+      <Clock3 className="absolute -right-1 -bottom-1 h-2.5 w-2.5 rounded-full bg-primary p-px" />
+    </span>
+  );
+};
+
+const SendModeDropdown: React.FC<{
+  mode: MessageSendMode;
+  disabled?: boolean;
+  active?: boolean;
+  size?: "compact" | "default";
+  className?: string;
+  onChange?: (mode: MessageSendMode) => void;
+}> = ({ mode, disabled, active = false, size = "compact", className, onChange }) => (
+  <DropdownMenu>
+    <DropdownMenuTrigger asChild>
+      <Button
+        type="button"
+        variant={active ? "default" : "ghost"}
+        size="icon"
+        disabled={disabled}
+        className={cn(
+          size === "default" ? "h-9 w-7" : "h-8 w-5",
+          "rounded-none px-0",
+          active && "border-l border-primary-foreground/25",
+          className,
+        )}
+        aria-label={`Send mode: ${SEND_MODE_DETAILS[mode].label}`}
+      >
+        <ChevronDown className="h-3.5 w-3.5" />
+      </Button>
+    </DropdownMenuTrigger>
+    <DropdownMenuContent align="end" side="top" className="w-64">
+      <DropdownMenuRadioGroup
+        value={mode}
+        onValueChange={(value) => onChange?.(value as MessageSendMode)}
+      >
+        {(Object.keys(SEND_MODE_DETAILS) as MessageSendMode[]).map((option) => (
+          <DropdownMenuRadioItem key={option} value={option} className="items-start py-2">
+            <div className="space-y-0.5">
+              <div className="text-sm font-medium">{SEND_MODE_DETAILS[option].label}</div>
+              <div className="text-xs text-muted-foreground">
+                {SEND_MODE_DETAILS[option].description}
+              </div>
+            </div>
+          </DropdownMenuRadioItem>
+        ))}
+      </DropdownMenuRadioGroup>
+    </DropdownMenuContent>
+  </DropdownMenu>
+);
+
 const MODEL_ICONS: Record<ModelId, React.ReactNode> = {
   "claude-sonnet-4-6": <Zap className="h-3.5 w-3.5" />,
   "claude-sonnet-5": <Zap className="h-3.5 w-3.5" />,
@@ -411,6 +494,8 @@ const FloatingPromptInputInner = (
     onModelChange,
     onEffortChange,
     onPermissionModeChange,
+    sendMode = "inject",
+    onSendModeChange,
   }: FloatingPromptInputProps,
   ref: React.Ref<FloatingPromptInputRef>,
 ) => {
@@ -1434,17 +1519,28 @@ const FloatingPromptInputInner = (
                   </div>
                 </div>
 
-                <div className="flex gap-1">
-                  <TooltipSimple content="Send message" side="top">
-                    <motion.div whileTap={{ scale: 0.97 }} transition={{ duration: 0.15 }}>
+                <div className="flex gap-2">
+                  <TooltipSimple content={SEND_MODE_DETAILS[sendMode].label} side="top">
+                    <motion.div
+                      whileTap={{ scale: 0.97 }}
+                      transition={{ duration: 0.15 }}
+                      className="flex overflow-hidden rounded-md bg-primary text-primary-foreground shadow-sm"
+                    >
                       <Button
                         onClick={handleSend}
                         disabled={!prompt.trim() || disabled}
                         size="default"
-                        className="min-w-[60px]"
+                        className="min-w-[60px] rounded-none"
                       >
-                        <Send className="h-4 w-4" />
+                        <SendModeIcon mode={sendMode} />
                       </Button>
+                      <SendModeDropdown
+                        mode={sendMode}
+                        onChange={onSendModeChange}
+                        disabled={disabled}
+                        active
+                        size="default"
+                      />
                     </motion.div>
                   </TooltipSimple>
                   <TooltipSimple content="Stop generation" side="top">
@@ -1680,7 +1776,7 @@ const FloatingPromptInputInner = (
                   autoCapitalize={autoCorrect ? "on" : "off"}
                   spellCheck={autoCorrect}
                   className={cn(
-                    "resize-none pr-20 pl-3 py-2.5 transition-all duration-150",
+                    "resize-none pr-32 pl-3 py-2.5 transition-all duration-150",
                     dragActive && "border-primary",
                     textareaHeight >= 160 && "overflow-y-auto scrollbar-thin"
                   )}
@@ -1691,7 +1787,7 @@ const FloatingPromptInputInner = (
                 />
 
                 {/* Action buttons inside input - fixed at bottom right */}
-                <div className="absolute right-1.5 bottom-1.5 flex items-center gap-0.5">
+                <div className="absolute right-1.5 bottom-1.5 flex items-center gap-2">
                   <TooltipSimple content="Expand (Ctrl+Shift+E)" side="top">
                     <motion.div
                       whileTap={{ scale: 0.97 }}
@@ -1709,20 +1805,37 @@ const FloatingPromptInputInner = (
                     </motion.div>
                   </TooltipSimple>
 
-                  <TooltipSimple content="Send message (Enter)" side="top">
-                    <motion.div whileTap={{ scale: 0.97 }} transition={{ duration: 0.15 }}>
+                  <TooltipSimple content={`${SEND_MODE_DETAILS[sendMode].label} (Enter)`} side="top">
+                    <motion.div
+                      whileTap={{ scale: 0.97 }}
+                      transition={{ duration: 0.15 }}
+                      className={cn(
+                        "flex overflow-hidden rounded-md",
+                        prompt.trim()
+                          ? "bg-primary text-primary-foreground shadow-sm"
+                          : "bg-muted text-muted-foreground",
+                      )}
+                    >
                       <Button
                         onClick={handleSend}
                         disabled={!prompt.trim() || disabled}
                         variant={prompt.trim() ? "default" : "ghost"}
                         size="icon"
                         className={cn(
-                          "h-8 w-8 transition-all",
-                          prompt.trim() && "shadow-sm"
+                          "h-8 w-8 rounded-none transition-all",
                         )}
                       >
-                        <Send className="h-4 w-4" />
+                        <SendModeIcon mode={sendMode} />
                       </Button>
+                      <SendModeDropdown
+                        mode={sendMode}
+                        onChange={onSendModeChange}
+                        disabled={disabled}
+                        active={Boolean(prompt.trim())}
+                        className={cn(
+                          !prompt.trim() && "text-foreground hover:bg-foreground/10",
+                        )}
+                      />
                     </motion.div>
                   </TooltipSimple>
 
