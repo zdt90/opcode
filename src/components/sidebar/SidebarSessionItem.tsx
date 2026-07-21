@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Pencil, Trash2, Check, X, AlertTriangle, EyeOff, ArchiveRestore } from 'lucide-react';
+import { Pencil, Trash2, Check, X, AlertTriangle, EyeOff, ArchiveRestore, Star } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import {
   Dialog,
@@ -11,6 +11,11 @@ import { cn } from '@/lib/utils';
 import { formatTimeAgoBrief } from '@/lib/date-utils';
 import { apiCall } from '@/lib/apiAdapter';
 import type { Session } from '@/lib/api';
+import {
+  removeSessionHighlight,
+  toggleSessionHighlight,
+  useHighlightedSessionIds,
+} from '@/lib/sessionHighlightStore';
 
 interface SidebarSessionItemProps {
   session: Session;
@@ -55,6 +60,8 @@ export const SidebarSessionItem: React.FC<SidebarSessionItemProps> = ({
   const [renameValue, setRenameValue] = useState(displayName);
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const highlightedSessionIds = useHighlightedSessionIds();
+  const isHighlighted = highlightedSessionIds.has(session.id);
 
   const [relativeTime, setRelativeTime] = useState(() =>
     formatTimeAgoBrief(getSessionTimestampMs(session))
@@ -132,6 +139,12 @@ export const SidebarSessionItem: React.FC<SidebarSessionItemProps> = ({
         action: () => { setRenameValue(displayName); setIsRenaming(true); },
       });
 
+      const highlightItem = await MenuItem.new({
+        id: isHighlighted ? 'remove-session-highlight' : 'highlight-session',
+        text: isHighlighted ? 'Remove Highlight' : 'Highlight Session',
+        action: () => toggleSessionHighlight(session.id),
+      });
+
       const archiveItem = await MenuItem.new({
         id: isArchived ? 'unarchive-session' : 'archive-session',
         text: isArchived ? 'Unarchive Session' : 'Archive Session',
@@ -160,7 +173,18 @@ export const SidebarSessionItem: React.FC<SidebarSessionItemProps> = ({
         action: () => onRefreshSessions(),
       });
 
-      const menuItems: any[] = [openInNewTabItem, copyIdItem, revealJsonlItem, sep1, renameItem, archiveItem, deleteItem, sep2, reloadItem];
+      const menuItems: any[] = [
+        openInNewTabItem,
+        copyIdItem,
+        revealJsonlItem,
+        sep1,
+        highlightItem,
+        renameItem,
+        archiveItem,
+        deleteItem,
+        sep2,
+        reloadItem,
+      ];
 
       if (import.meta.env.DEV) {
         const inspectItem = await MenuItem.new({
@@ -228,6 +252,7 @@ export const SidebarSessionItem: React.FC<SidebarSessionItemProps> = ({
       await apiCall('delete_session', { sessionId: session.id });
       // Clean up any unsent draft saved for this session.
       localStorage.removeItem(`opcode-draft-${session.id}`);
+      removeSessionHighlight(session.id);
       onDelete(session.id);
     } catch (err) {
       console.error('[Sidebar] Failed to delete session:', err);
@@ -297,6 +322,7 @@ export const SidebarSessionItem: React.FC<SidebarSessionItemProps> = ({
         isActive
           ? 'bg-primary/15 text-primary'
           : 'text-muted-foreground hover:text-foreground hover:bg-accent/50',
+        isHighlighted && !isActive && 'bg-amber-500/10 text-foreground hover:bg-amber-500/15 ring-1 ring-inset ring-amber-500/20',
         isArchived && 'opacity-60'
       )}
       onMouseEnter={() => setIsHovered(true)}
@@ -341,7 +367,10 @@ export const SidebarSessionItem: React.FC<SidebarSessionItemProps> = ({
             </span>
           )}
           <div className="flex-1 min-w-0 flex items-baseline justify-between gap-1.5 overflow-hidden">
-            <span className="truncate text-xs font-medium text-foreground/90 leading-tight">{displayName}</span>
+            <span className={cn(
+              'truncate text-xs text-foreground/90 leading-tight',
+              isHighlighted ? 'font-semibold' : 'font-medium',
+            )}>{displayName}</span>
             <span className="shrink-0 text-[10px] text-muted-foreground/60 leading-tight ml-auto">{relativeTime}</span>
           </div>
 
@@ -353,6 +382,22 @@ export const SidebarSessionItem: React.FC<SidebarSessionItemProps> = ({
                 title="Rename session"
               >
                 <Pencil size={11} />
+              </button>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  toggleSessionHighlight(session.id);
+                }}
+                className={cn(
+                  'p-0.5 rounded hover:bg-accent transition-colors',
+                  isHighlighted
+                    ? 'fill-amber-400 text-amber-400 hover:text-amber-300'
+                    : 'text-muted-foreground hover:text-foreground',
+                )}
+                title={isHighlighted ? 'Remove highlight' : 'Highlight session'}
+                aria-label={isHighlighted ? 'Remove highlight' : 'Highlight session'}
+              >
+                <Star size={11} />
               </button>
               {isArchived ? (
                 <button

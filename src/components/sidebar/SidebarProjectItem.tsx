@@ -5,6 +5,7 @@ import { cn } from '@/lib/utils';
 import { apiCall } from '@/lib/apiAdapter';
 import { SidebarSessionItem } from './SidebarSessionItem';
 import type { Session } from '@/lib/api';
+import { useHighlightedSessionIds } from '@/lib/sessionHighlightStore';
 
 interface ProjectItem {
   id: string;
@@ -51,6 +52,7 @@ export const SidebarProjectItem: React.FC<SidebarProjectItemProps> = ({
   const [isCreatingSession, setIsCreatingSession] = useState(false);
   const [newSessionName, setNewSessionName] = useState('');
   const newSessionInputRef = useRef<HTMLInputElement>(null);
+  const highlightedSessionIds = useHighlightedSessionIds();
 
   const projectName = getProjectBaseName(project.path);
 
@@ -235,6 +237,11 @@ export const SidebarProjectItem: React.FC<SidebarProjectItemProps> = ({
   const visibleSessions = sessions.filter((s) =>
     showArchived ? archivedIds.has(s.id) : !archivedIds.has(s.id)
   );
+  // Preserve the API's existing age order within each group.
+  const orderedVisibleSessions = [
+    ...visibleSessions.filter((session) => highlightedSessionIds.has(session.id)),
+    ...visibleSessions.filter((session) => !highlightedSessionIds.has(session.id)),
+  ];
   const archivedCount = sessions.filter((s) => archivedIds.has(s.id)).length;
 
   return (
@@ -305,7 +312,7 @@ export const SidebarProjectItem: React.FC<SidebarProjectItemProps> = ({
               {showArchived ? 'No archived sessions' : 'No sessions'}
             </p>
           )}
-          {visibleSessions.map((session) => (
+          {orderedVisibleSessions.map((session) => (
             <SidebarSessionItem
               key={session.id}
               session={session}
