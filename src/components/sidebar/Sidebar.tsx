@@ -3,7 +3,7 @@
  */
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { ChevronLeft, ChevronRight, RefreshCw } from 'lucide-react';
+import { ChevronLeft, ChevronRight, RefreshCw, Search, X } from 'lucide-react';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/utils';
 import { apiCall } from '@/lib/apiAdapter';
@@ -46,6 +46,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const [reloadSignal, setReloadSignal] = useState(0);
   const [silentReloadSignal, setSilentReloadSignal] = useState(0);
   const [sidebarWidth, setSidebarWidth] = useState(SIDEBAR_WIDTH_DEFAULT);
+  const [sessionSearchQuery, setSessionSearchQuery] = useState('');
+  const [searchResultCounts, setSearchResultCounts] = useState<Record<string, number>>({});
   const pollingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const isDraggingRef = useRef(false);
   const dragStartXRef = useRef(0);
@@ -189,10 +191,28 @@ export const Sidebar: React.FC<SidebarProps> = ({
     window.addEventListener('mouseup', onMouseUp);
   };
 
+  const handleSearchQueryChange = (query: string) => {
+    setSessionSearchQuery(query);
+    setSearchResultCounts({});
+  };
+
+  const handleSearchResultCount = useCallback((projectId: string, count: number) => {
+    setSearchResultCounts((current) =>
+      current[projectId] === count ? current : { ...current, [projectId]: count },
+    );
+  }, []);
+
+  const isSearching = sessionSearchQuery.trim().length > 0;
+  const searchIsComplete = isSearching
+    && projects.length > 0
+    && projects.every((project) => searchResultCounts[project.id] !== undefined);
+  const hasNoSearchResults = searchIsComplete
+    && Object.values(searchResultCounts).every((count) => count === 0);
+
   return (
     <div
       className={cn(
-        'relative flex flex-col h-full border-r border-border/50 bg-background/95 backdrop-blur-sm overflow-hidden shrink-0',
+        'relative flex flex-col h-full min-h-0 border-r border-border/50 bg-background/95 backdrop-blur-sm overflow-hidden shrink-0',
         !isOpen && 'w-0 border-r-0',
         className
       )}
@@ -202,37 +222,66 @@ export const Sidebar: React.FC<SidebarProps> = ({
       {isOpen && (
         <>
           {/* Sidebar header */}
-          <div className="flex items-center justify-between px-3 py-2 border-b border-border/40">
-            <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-              Sessions
-            </span>
-            <div className="flex items-center gap-1">
-              <button
-                onClick={loadProjects}
-                disabled={loading}
-                className="p-1 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition-colors disabled:opacity-40"
-                title="Refresh"
-              >
-                <RefreshCw size={12} className={loading ? 'animate-spin' : ''} />
-              </button>
-              <button
-                onClick={onToggle}
-                className="p-1 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition-colors"
-                title="Collapse sidebar"
-              >
-                <ChevronLeft size={14} />
-              </button>
+          <div className="shrink-0 border-b border-border/40 px-3 py-2">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                Sessions
+              </span>
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={loadProjects}
+                  disabled={loading}
+                  className="p-1 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition-colors disabled:opacity-40"
+                  title="Refresh"
+                >
+                  <RefreshCw size={12} className={loading ? 'animate-spin' : ''} />
+                </button>
+                <button
+                  onClick={onToggle}
+                  className="p-1 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition-colors"
+                  title="Collapse sidebar"
+                >
+                  <ChevronLeft size={14} />
+                </button>
+              </div>
+            </div>
+            <div className="relative mt-2">
+              <Search size={13} className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground" />
+              <input
+                type="search"
+                value={sessionSearchQuery}
+                onChange={(event) => handleSearchQueryChange(event.target.value)}
+                placeholder="Search sessions"
+                className="h-7 w-full rounded-md border border-border/60 bg-muted/30 py-1 pl-7 pr-7 text-xs text-foreground outline-none placeholder:text-muted-foreground focus:border-primary/60 focus:bg-background"
+                aria-label="Search sessions by name or ID"
+              />
+              {sessionSearchQuery && (
+                <button
+                  onClick={() => handleSearchQueryChange('')}
+                  className="absolute right-1 top-1/2 -translate-y-1/2 rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+                  title="Clear search"
+                  aria-label="Clear session search"
+                >
+                  <X size={12} />
+                </button>
+              )}
             </div>
           </div>
 
           {/* Scrollable project list */}
-          <ScrollArea className="flex-1">
-            <div className="px-2 py-2">
+          <ScrollArea className="flex-1 min-h-0">
+            <div
+              className="px-2 py-2"
+              style={{ paddingBottom: 'calc(var(--opcode-prompt-bar-height, 96px) + 8px)' }}
+            >
               {error && (
                 <p className="text-xs text-destructive px-2 py-1">{error}</p>
               )}
               {!error && projects.length === 0 && !loading && (
                 <p className="text-xs text-muted-foreground px-2 py-1">No projects found</p>
+              )}
+              {hasNoSearchResults && (
+                <p className="px-2 py-3 text-xs text-muted-foreground">No matching sessions</p>
               )}
               {projects.map((project) => (
                 <SidebarProjectItem
@@ -246,6 +295,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   onNewSession={onNewSession}
                   reloadSignal={reloadSignal}
                   silentReloadSignal={silentReloadSignal}
+                  sessionSearchQuery={sessionSearchQuery}
+                  onSearchResultCountChange={handleSearchResultCount}
                 />
               ))}
             </div>

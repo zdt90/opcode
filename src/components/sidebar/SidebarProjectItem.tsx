@@ -24,6 +24,8 @@ interface SidebarProjectItemProps {
   reloadSignal?: number;
   /** Incrementing this triggers a silent (no-spinner) refresh of sessions */
   silentReloadSignal?: number;
+  sessionSearchQuery?: string;
+  onSearchResultCountChange?: (projectId: string, count: number) => void;
 }
 
 function getProjectBaseName(path: string): string {
@@ -41,6 +43,8 @@ export const SidebarProjectItem: React.FC<SidebarProjectItemProps> = ({
   onNewSession,
   reloadSignal,
   silentReloadSignal,
+  sessionSearchQuery = '',
+  onSearchResultCountChange,
 }) => {
   const [isExpanded, setIsExpanded] = useState(false);
   const [sessions, setSessions] = useState<Session[]>([]);
@@ -55,6 +59,8 @@ export const SidebarProjectItem: React.FC<SidebarProjectItemProps> = ({
   const highlightedSessionIds = useHighlightedSessionIds();
 
   const projectName = getProjectBaseName(project.path);
+  const normalizedSearchQuery = sessionSearchQuery.trim().toLocaleLowerCase();
+  const isSearching = normalizedSearchQuery.length > 0;
 
   useEffect(() => {
     if (isCreatingSession && newSessionInputRef.current) {
@@ -106,6 +112,12 @@ export const SidebarProjectItem: React.FC<SidebarProjectItemProps> = ({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [silentReloadSignal]);
+
+  // Search should include sessions in collapsed projects, so load them on demand.
+  useEffect(() => {
+    if (isSearching && !loaded) loadSessions();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isSearching, loaded]);
 
   const loadSessions = async (force = false, silent = false) => {
     if (loaded && !force) return;
@@ -234,15 +246,51 @@ export const SidebarProjectItem: React.FC<SidebarProjectItemProps> = ({
     }
   };
 
-  const visibleSessions = sessions.filter((s) =>
-    showArchived ? archivedIds.has(s.id) : !archivedIds.has(s.id)
-  );
+  const visibleSessions = sessions.filter((session) => {
+    const matchesArchiveFilter = showArchived
+      ? archivedIds.has(session.id)
+      : !archivedIds.has(session.id);
+    if (!matchesArchiveFilter) return false;
+    if (!isSearching) return true;
+
+    const searchableName = sessionNames[session.id] || session.first_message || '';
+    return `${searchableName} ${session.id}`.toLocaleLowerCase().includes(normalizedSearchQuery);
+  });
   // Preserve the API's existing age order within each group.
-  const orderedVisibleSessions = [
-    ...visibleSessions.filter((session) => highlightedSessionIds.has(session.id)),
-    ...visibleSessions.filter((session) => !highlightedSessionIds.has(session.id)),
-  ];
+  const highlightedSessions = visibleSessions.filter((session) => highlightedSessionIds.has(session.id));
+  const regularSessions = visibleSessions.filter((session) => !highlightedSessionIds.has(session.id));
+  const orderedVisibleSessions = [...highlightedSessions, ...regularSessions];
   const archivedCount = sessions.filter((s) => archivedIds.has(s.id)).length;
+
+  useEffect(() => {
+    if (isSearching && loaded) {
+      onSearchResultCountChange?.(project.id, orderedVisibleSessions.length);
+    }
+  }, [isSearching, loaded, onSearchResultCountChange, orderedVisibleSessions.length, project.id]);
+
+  if (isSearching && loaded && orderedVisibleSessions.length === 0) {
+    return null;
+  }
+
+  const renderSession = (session: Session, isPinnedGroup = false) => (
+    <SidebarSessionItem
+      key={session.id}
+      session={session}
+      projectId={project.id}
+      isActive={session.id === activeSessionId}
+      isRunning={runningSessionIds ? runningSessionIds.has(session.id) : false}
+      isArchived={archivedIds.has(session.id)}
+      isPinnedGroup={isPinnedGroup}
+      displayName={getDisplayName(session)}
+      onClick={() => onSessionSelect(session, project.path, getDisplayName(session))}
+      onOpenInNewTab={() => onSessionSelectNewTab(session, project.path, getDisplayName(session))}
+      onRefreshSessions={() => loadSessions(true)}
+      onDelete={handleDeleteSession}
+      onRename={handleRenameSession}
+      onArchive={handleArchiveSession}
+      onUnarchive={handleUnarchiveSession}
+    />
+  );
 
   return (
     <div className="mb-1">
@@ -266,10 +314,10 @@ export const SidebarProjectItem: React.FC<SidebarProjectItemProps> = ({
       </button>
 
       {/* Sessions list */}
-      {isExpanded && (
+      {(isExpanded || isSearching) && (
         <div className="pl-5 mt-0.5 space-y-0.5">
           {/* New Session button / inline name input */}
-          {!showArchived && (
+          {!showArchived && !isSearching && (
             isCreatingSession ? (
               <div className="flex items-center gap-1 px-2 py-1" onClick={(e) => e.stopPropagation()}>
                 <Plus size={11} className="shrink-0 text-muted-foreground" />
@@ -307,31 +355,19 @@ export const SidebarProjectItem: React.FC<SidebarProjectItemProps> = ({
               </button>
             )
           )}
-          {visibleSessions.length === 0 && !loading && (
+          {visibleSessions.length === 0 && !loading && !isSearching && (
             <p className="text-[10px] text-muted-foreground px-2 py-1">
               {showArchived ? 'No archived sessions' : 'No sessions'}
             </p>
           )}
-          {orderedVisibleSessions.map((session) => (
-            <SidebarSessionItem
-              key={session.id}
-              session={session}
-              projectId={project.id}
-              isActive={session.id === activeSessionId}
-              isRunning={runningSessionIds ? runningSessionIds.has(session.id) : false}
-              isArchived={archivedIds.has(session.id)}
-              displayName={getDisplayName(session)}
-              onClick={() => onSessionSelect(session, project.path, getDisplayName(session))}
-              onOpenInNewTab={() => onSessionSelectNewTab(session, project.path, getDisplayName(session))}
-              onRefreshSessions={() => loadSessions(true)}
-              onDelete={handleDeleteSession}
-              onRename={handleRenameSession}
-              onArchive={handleArchiveSession}
-              onUnarchive={handleUnarchiveSession}
-            />
-          ))}
+          {highlightedSessions.length > 0 && (
+            <div className="overflow-hidden rounded-md bg-muted/65">
+              {highlightedSessions.map((session) => renderSession(session, true))}
+            </div>
+          )}
+          {regularSessions.map((session) => renderSession(session))}
           {/* Show/Hide Archived toggle */}
-          {archivedCount > 0 && (
+          {archivedCount > 0 && !isSearching && (
             <button
               onClick={() => setShowArchived((v) => !v)}
               className="w-full flex items-center gap-1.5 px-2 py-1.5 rounded-md text-xs text-muted-foreground/60 hover:text-muted-foreground hover:bg-accent/30 transition-colors"
