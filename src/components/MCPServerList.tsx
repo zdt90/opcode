@@ -14,11 +14,12 @@ import {
   FileText,
   ChevronDown,
   ChevronUp,
-  Copy
+  Copy,
+  KeyRound
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { api, type MCPServer } from "@/lib/api";
+import { api, type MCPLoginResult, type MCPServer } from "@/lib/api";
 import { useTrackEvent } from "@/hooks";
 
 interface MCPServerListProps {
@@ -38,6 +39,12 @@ interface MCPServerListProps {
    * Callback to refresh the server list
    */
   onRefresh: () => void;
+  /** Called when Claude Code completes OAuth for a server. */
+  onServerAuthenticated: (name: string) => void;
+  /** Called when a server's OAuth flow could not be completed. */
+  onAuthenticationError: (name: string, message?: string) => void;
+  /** Called after authentication has completed for all remote servers. */
+  onServersAuthenticated: (results: MCPLoginResult[]) => void;
 }
 
 /**
@@ -49,9 +56,14 @@ export const MCPServerList: React.FC<MCPServerListProps> = ({
   loading,
   onServerRemoved,
   onRefresh,
+  onServerAuthenticated,
+  onAuthenticationError,
+  onServersAuthenticated,
 }) => {
   const [removingServer, setRemovingServer] = useState<string | null>(null);
   const [testingServer, setTestingServer] = useState<string | null>(null);
+  const [authenticatingServer, setAuthenticatingServer] = useState<string | null>(null);
+  const [authenticatingAll, setAuthenticatingAll] = useState(false);
   const [expandedServers, setExpandedServers] = useState<Set<string>>(new Set());
   const [copiedServer, setCopiedServer] = useState<string | null>(null);
   const [connectedServers] = useState<string[]>([]);
@@ -148,11 +160,61 @@ export const MCPServerList: React.FC<MCPServerListProps> = ({
     }
   };
 
+  const handleAuthenticate = async (name: string) => {
+    try {
+      setAuthenticatingServer(name);
+      await api.mcpLogin(name);
+      await onRefresh();
+      onServerAuthenticated(name);
+    } catch (error) {
+      console.error("Failed to authenticate MCP server:", error);
+      onAuthenticationError(name, error instanceof Error ? error.message : String(error));
+    } finally {
+      setAuthenticatingServer(null);
+    }
+  };
+
+  const handleAuthenticateAll = async () => {
+    const remoteNames = servers.filter(isRemoteServer).map((server) => server.name);
+    if (remoteNames.length === 0) return;
+
+    try {
+      setAuthenticatingAll(true);
+      const results = await api.mcpLoginAll(remoteNames);
+      await onRefresh();
+      onServersAuthenticated(results);
+    } catch (error) {
+      console.error("Failed to authenticate remote MCP servers:", error);
+      onAuthenticationError(
+        "remote MCP servers",
+        error instanceof Error ? error.message : String(error),
+      );
+    } finally {
+      setAuthenticatingAll(false);
+    }
+  };
+
+  const getRemoteUrl = (server: MCPServer) => {
+    if (server.url) return server.url;
+    return server.command?.match(/https?:\/\/\S+/)?.[0];
+  };
+
+  const isRemoteServer = (server: MCPServer) => {
+    const transport = server.transport.toLowerCase();
+    return transport === "http" || transport === "sse" || Boolean(getRemoteUrl(server));
+  };
+
+  const remoteServerCount = servers.filter(isRemoteServer).length;
+
   /**
    * Gets icon for transport type
    */
-  const getTransportIcon = (transport: string) => {
-    switch (transport) {
+  const getTransportIcon = (server: MCPServer) => {
+    if (isRemoteServer(server)) {
+      return <Globe className="h-4 w-4 text-emerald-500" />;
+    }
+
+    switch (server.transport) {
       case "stdio":
         return <Terminal className="h-4 w-4 text-amber-500" />;
       case "sse":
@@ -200,6 +262,8 @@ export const MCPServerList: React.FC<MCPServerListProps> = ({
   const renderServerItem = (server: MCPServer) => {
     const isExpanded = expandedServers.has(server.name);
     const isCopied = copiedServer === server.name;
+    const remoteUrl = getRemoteUrl(server);
+    const isRemote = isRemoteServer(server);
     
     return (
       <motion.div
@@ -214,7 +278,7 @@ export const MCPServerList: React.FC<MCPServerListProps> = ({
             <div className="flex-1 min-w-0 space-y-1">
               <div className="flex items-center gap-2">
                 <div className="p-1.5 bg-primary/10 rounded">
-                  {getTransportIcon(server.transport)}
+                  {getTransportIcon(server)}
                 </div>
                 <h4 className="font-medium truncate">{server.name}</h4>
                 {server.status?.running && (
@@ -242,10 +306,10 @@ export const MCPServerList: React.FC<MCPServerListProps> = ({
                 </div>
               )}
               
-              {server.transport === "sse" && server.url && !isExpanded && (
+              {remoteUrl && !isExpanded && (
                 <div className="overflow-hidden">
-                  <p className="text-xs text-muted-foreground font-mono truncate pl-9" title={server.url}>
-                    {server.url}
+                  <p className="text-xs text-muted-foreground font-mono truncate pl-9" title={remoteUrl}>
+                    {remoteUrl}
                   </p>
                 </div>
               )}
@@ -257,7 +321,24 @@ export const MCPServerList: React.FC<MCPServerListProps> = ({
               )}
             </div>
             
-            <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
+            <div className="flex items-center gap-2 flex-shrink-0">
+              {isRemote && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleAuthenticate(server.name)}
+                  disabled={authenticatingAll || authenticatingServer === server.name}
+                  className="h-8 gap-1.5 border-primary/30 text-primary hover:bg-primary/10"
+                >
+                  {authenticatingServer === server.name ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <KeyRound className="h-3.5 w-3.5" />
+                  )}
+                  Authenticate
+                </Button>
+              )}
+              <div className="flex items-center gap-2 opacity-0 transition-opacity group-hover:opacity-100">
               <Button
                 variant="ghost"
                 size="sm"
@@ -284,6 +365,7 @@ export const MCPServerList: React.FC<MCPServerListProps> = ({
                   <Trash2 className="h-4 w-4" />
                 )}
               </Button>
+              </div>
             </div>
           </div>
           
@@ -341,11 +423,11 @@ export const MCPServerList: React.FC<MCPServerListProps> = ({
                 </div>
               )}
               
-              {server.transport === "sse" && server.url && (
+              {remoteUrl && (
                 <div className="space-y-1">
                   <p className="text-xs font-medium text-muted-foreground">URL</p>
                   <p className="text-xs font-mono bg-muted/50 p-2 rounded break-all">
-                    {server.url}
+                    {remoteUrl}
                   </p>
                 </div>
               )}
@@ -389,15 +471,33 @@ export const MCPServerList: React.FC<MCPServerListProps> = ({
             {servers.length} server{servers.length !== 1 ? "s" : ""} configured
           </p>
         </div>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={onRefresh}
-          className="gap-2 hover:bg-primary/10 hover:text-primary hover:border-primary/50"
-        >
-          <RefreshCw className="h-4 w-4" />
-          Refresh
-        </Button>
+        <div className="flex items-center gap-2">
+          {remoteServerCount > 0 && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleAuthenticateAll}
+              disabled={authenticatingAll || authenticatingServer !== null}
+              className="gap-2 border-primary/30 text-primary hover:bg-primary/10"
+            >
+              {authenticatingAll ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <KeyRound className="h-4 w-4" />
+              )}
+              Authenticate all
+            </Button>
+          )}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={onRefresh}
+            className="gap-2 hover:bg-primary/10 hover:text-primary hover:border-primary/50"
+          >
+            <RefreshCw className="h-4 w-4" />
+            Refresh
+          </Button>
+        </div>
       </div>
 
       {/* Server List */}
@@ -431,4 +531,4 @@ export const MCPServerList: React.FC<MCPServerListProps> = ({
       )}
     </div>
   );
-}; 
+};

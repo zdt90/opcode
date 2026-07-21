@@ -335,6 +335,15 @@ fn create_system_command(claude_path: &str, args: Vec<String>, project_path: &st
     cmd
 }
 
+fn add_elicitation_hook_settings(app: &AppHandle, args: &mut Vec<String>, tab_id: &str) {
+    if let Some(bridge) = app.try_state::<crate::commands::elicitation::McpElicitationBridge>() {
+        args.push("--settings".to_string());
+        args.push(bridge.hook_settings(tab_id));
+    } else {
+        log::warn!("MCP elicitation bridge is unavailable for tab {tab_id}");
+    }
+}
+
 /// Gets the user's home directory path
 #[tauri::command]
 pub async fn get_home_directory() -> Result<String, String> {
@@ -1045,6 +1054,7 @@ pub async fn execute_claude_code(
         "--verbose".to_string(),
     ];
     args.extend(session_control_args(skip, &permission_mode, &effort)?);
+    add_elicitation_hook_settings(&app, &mut args, &tab_id);
 
     let mut cmd = create_system_command(&claude_path, args, &project_path);
     apply_1m_context_env(&mut cmd, use_1_m_context);
@@ -1089,6 +1099,7 @@ pub async fn continue_claude_code(
         "--verbose".to_string(),
     ];
     args.extend(session_control_args(skip, &permission_mode, &effort)?);
+    add_elicitation_hook_settings(&app, &mut args, &tab_id);
 
     let mut cmd = create_system_command(&claude_path, args, &project_path);
     apply_1m_context_env(&mut cmd, use_1_m_context);
@@ -1136,6 +1147,7 @@ pub async fn resume_claude_code(
         "--verbose".to_string(),
     ];
     args.extend(session_control_args(skip, &permission_mode, &effort)?);
+    add_elicitation_hook_settings(&app, &mut args, &tab_id);
 
     let mut cmd = create_system_command(&claude_path, args, &project_path);
     apply_1m_context_env(&mut cmd, use_1_m_context);
@@ -1292,6 +1304,10 @@ pub async fn cancel_claude_execution(
 
     if !killed && attempted_methods.is_empty() {
         log::warn!("No active Claude process found to cancel");
+    }
+
+    if let Some(bridge) = app.try_state::<crate::commands::elicitation::McpElicitationBridge>() {
+        bridge.cancel_all().await;
     }
 
     // Always emit cancellation events for UI consistency
@@ -1550,6 +1566,9 @@ pub async fn kill_tab_process(app: AppHandle, tab_id: String) -> Result<(), Stri
         }
     }
     claude_state.stdins.lock().await.remove(&tab_id);
+    if let Some(bridge) = app.try_state::<crate::commands::elicitation::McpElicitationBridge>() {
+        bridge.cancel_tab(&tab_id).await;
+    }
     Ok(())
 }
 

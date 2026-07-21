@@ -361,6 +361,12 @@ export interface MCPServer {
   status: ServerStatus;
 }
 
+export interface MCPLoginResult {
+  name: string;
+  success: boolean;
+  message: string;
+}
+
 /**
  * Server status information
  */
@@ -1481,6 +1487,30 @@ export const api = {
       return await apiCall<MCPServer>("mcp_get", { name });
     } catch (error) {
       console.error("Failed to get MCP server:", error);
+      throw error;
+    }
+  },
+
+  /**
+   * Opens Claude Code's OAuth flow for a remote MCP server.
+   */
+  async mcpLogin(name: string): Promise<string> {
+    try {
+      return await apiCall<string>("mcp_login", { name });
+    } catch (error) {
+      console.error("Failed to authenticate MCP server:", error);
+      throw error;
+    }
+  },
+
+  /**
+   * Starts authentication for remote MCP servers concurrently.
+   */
+  async mcpLoginAll(names: string[]): Promise<MCPLoginResult[]> {
+    try {
+      return await apiCall<MCPLoginResult[]>("mcp_login_all", { names });
+    } catch (error) {
+      console.error("Failed to authenticate MCP servers:", error);
       throw error;
     }
   },

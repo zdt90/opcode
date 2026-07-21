@@ -95,6 +95,14 @@ pub struct ImportServerResult {
     pub error: Option<String>,
 }
 
+/// Result of one server in a batch authentication run.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MCPLoginResult {
+    pub name: String,
+    pub success: bool,
+    pub message: String,
+}
+
 /// Executes a claude mcp command
 fn execute_claude_mcp_command(app_handle: &AppHandle, args: Vec<&str>) -> Result<String> {
     info!("Executing claude mcp command with args: {:?}", args);
@@ -238,6 +246,49 @@ pub async fn mcp_list(app: AppHandle) -> Result<Vec<MCPServer>, String> {
             while i < lines.len() {
                 let line = lines[i];
                 info!("Processing line {}: {:?}", i, line);
+
+                // Remote servers are printed as "name: https://... (HTTP)".
+                // Parse from the URL rather than the first colon so plugin names
+                // containing colons remain intact.
+                let url_start = line
+                    .find("https://")
+                    .or_else(|| line.find("http://"));
+                if let Some(url_start) = url_start {
+                    let name = line[..url_start].trim().trim_end_matches(':').trim();
+                    let remote_details = &line[url_start..];
+                    let url = remote_details
+                        .split(" (")
+                        .next()
+                        .unwrap_or("")
+                        .trim()
+                        .to_string();
+                    let transport = remote_details
+                        .split_once(" (")
+                        .and_then(|(_, suffix)| suffix.split_once(')'))
+                        .map(|(value, _)| value.to_lowercase())
+                        .unwrap_or_else(|| "http".to_string());
+
+                    if !name.is_empty() && !url.is_empty() {
+                        servers.push(MCPServer {
+                            name: name.to_string(),
+                            transport,
+                            command: None,
+                            args: vec![],
+                            env: HashMap::new(),
+                            url: Some(url),
+                            scope: "local".to_string(),
+                            is_active: line.contains("Connected"),
+                            status: ServerStatus {
+                                // A remote server being connected is not the same as a local process running.
+                                running: false,
+                                error: None,
+                                last_checked: None,
+                            },
+                        });
+                        i += 1;
+                        continue;
+                    }
+                }
 
                 // Check if this line starts a new server entry
                 if let Some(colon_pos) = line.find(':') {
@@ -397,6 +448,94 @@ pub async fn mcp_get(app: AppHandle, name: String) -> Result<MCPServer, String> 
             Err(e.to_string())
         }
     }
+}
+
+/// Starts Claude Code's OAuth flow for one remote MCP server.
+/// Claude Code opens the browser and stores any resulting credentials itself.
+#[tauri::command]
+pub async fn mcp_login(app: AppHandle, name: String) -> Result<String, String> {
+    info!("Starting MCP authentication for: {}", name);
+
+    let claude_path = find_claude_binary(&app).map_err(|e| e.to_string())?;
+    let output = tokio::task::spawn_blocking(move || {
+        // Claude MCP authentication requires a TTY even when it opens the
+        // browser itself. `script` provides a hidden pseudo-terminal while
+        // preserving the normal browser-based OAuth flow.
+        #[cfg(target_os = "macos")]
+        let mut cmd = {
+            let mut command = create_command_with_env("/usr/bin/script");
+            command.args([
+                "-q",
+                "/dev/null",
+                &claude_path,
+                "mcp",
+                "login",
+                &name,
+            ]);
+            command
+        };
+
+        #[cfg(not(target_os = "macos"))]
+        let mut cmd = {
+            let mut command = create_command_with_env(&claude_path);
+            command.args(["mcp", "login", &name]);
+            command
+        };
+
+        cmd.output()
+    })
+    .await
+    .map_err(|e| format!("Failed to run MCP authentication: {}", e))?
+    .map_err(|e| format!("Failed to start MCP authentication: {}", e))?;
+
+    if output.status.success() {
+        let message = String::from_utf8_lossy(&output.stdout)
+            .replace('\r', "")
+            .trim()
+            .to_string();
+        Ok(if message.is_empty() {
+            "MCP authentication completed".to_string()
+        } else {
+            message
+        })
+    } else {
+        // PTYs commonly merge stderr into stdout, so preserve both streams.
+        let stdout = String::from_utf8_lossy(&output.stdout).replace('\r', "");
+        let stderr = String::from_utf8_lossy(&output.stderr).replace('\r', "");
+        let details = format!("{}\n{}", stdout.trim(), stderr.trim())
+            .trim()
+            .to_string();
+        Err(if details.is_empty() {
+            format!("MCP authentication failed with status {}", output.status)
+        } else {
+            details
+        })
+    }
+}
+
+/// Starts OAuth flows for all selected remote MCP servers at once.
+#[tauri::command]
+pub async fn mcp_login_all(app: AppHandle, names: Vec<String>) -> Result<Vec<MCPLoginResult>, String> {
+    let login_attempts = names.into_iter().map(|name| {
+        let app = app.clone();
+
+        async move {
+            match mcp_login(app, name.clone()).await {
+                Ok(message) => MCPLoginResult {
+                    name,
+                    success: true,
+                    message,
+                },
+                Err(message) => MCPLoginResult {
+                    name,
+                    success: false,
+                    message,
+                },
+            }
+        }
+    });
+
+    Ok(futures::future::join_all(login_attempts).await)
 }
 
 /// Removes an MCP server

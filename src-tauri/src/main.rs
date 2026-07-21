@@ -37,9 +37,11 @@ use commands::claude::{
 };
 use commands::mcp::{
     mcp_add, mcp_add_from_claude_desktop, mcp_add_json, mcp_get, mcp_get_server_status, mcp_list,
+    mcp_login, mcp_login_all,
     mcp_read_project_config, mcp_remove, mcp_reset_project_choices, mcp_save_project_config,
     mcp_serve, mcp_test_connection,
 };
+use commands::elicitation::{respond_to_mcp_elicitation, McpElicitationBridge};
 
 use commands::proxy::{apply_proxy_settings, get_proxy_settings, save_proxy_settings};
 use commands::storage::{
@@ -226,6 +228,12 @@ fn main() {
             // Initialize Claude process state
             app.manage(ClaudeProcessState::default());
 
+            // Bridge MCP elicitation hooks into session-scoped Opcode UI events.
+            let (elicitation_bridge, elicitation_listener) = McpElicitationBridge::bind()
+                .map_err(|error| std::io::Error::new(std::io::ErrorKind::Other, error))?;
+            elicitation_bridge.start(app.handle().clone(), elicitation_listener);
+            app.manage(elicitation_bridge);
+
             // Keep the window within the current monitor's bounds (e.g. when the
             // screen resolution changes) so it never ends up off-screen.
             if let Some(main_window) = app.get_webview_window("main") {
@@ -303,6 +311,7 @@ fn main() {
             resume_claude_code,
             cancel_claude_execution,
             inject_claude_message,
+            respond_to_mcp_elicitation,
             kill_tab_process,
             list_running_claude_sessions,
             get_claude_session_output,
@@ -373,6 +382,8 @@ fn main() {
             mcp_add,
             mcp_list,
             mcp_get,
+            mcp_login,
+            mcp_login_all,
             mcp_remove,
             mcp_add_json,
             mcp_add_from_claude_desktop,

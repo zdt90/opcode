@@ -152,15 +152,15 @@ export const CustomTitlebar: React.FC<CustomTitlebarProps> = ({
             </TooltipSimple>
           )}
           
-          {onUsageClick && (
-            <TooltipSimple content="Usage Dashboard" side="bottom">
+          {onMCPClick && (
+            <TooltipSimple content="MCP Servers" side="bottom">
               <motion.button
-                onClick={onUsageClick}
+                onClick={onMCPClick}
                 whileTap={{ scale: 0.97 }}
                 transition={{ duration: 0.15 }}
                 className="p-2 rounded-md hover:bg-accent hover:text-accent-foreground transition-colors tauri-no-drag"
               >
-                <BarChart3 size={16} />
+                <Network size={16} />
               </motion.button>
             </TooltipSimple>
           )}
@@ -213,16 +213,16 @@ export const CustomTitlebar: React.FC<CustomTitlebarProps> = ({
                     </button>
                   )}
                   
-                  {onMCPClick && (
+                  {onUsageClick && (
                     <button
                       onClick={() => {
-                        onMCPClick();
+                        onUsageClick();
                         setIsDropdownOpen(false);
                       }}
                       className="w-full px-4 py-2 text-left text-sm hover:bg-accent hover:text-accent-foreground transition-colors flex items-center gap-3"
                     >
-                      <Network size={14} />
-                      <span>MCP Servers</span>
+                      <BarChart3 size={14} />
+                      <span>Usage Dashboard</span>
                     </button>
                   )}
                   

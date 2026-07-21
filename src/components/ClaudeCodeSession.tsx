@@ -10,7 +10,10 @@ import {
   ChevronsDown,
   X,
   Hash,
-  Wrench
+  Wrench,
+  ExternalLink,
+  Loader2,
+  ShieldCheck
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -22,6 +25,7 @@ import { cn, containSelectionOnTripleClick } from "@/lib/utils";
 
 // Conditional imports for Tauri APIs
 import { listen as tauriListenImport } from "@tauri-apps/api/event";
+import { invoke } from "@tauri-apps/api/core";
 type UnlistenFn = () => void;
 
 console.log('[ClaudeCodeSession] BUILD v7 - Tauri listen imported:', typeof tauriListenImport);
@@ -76,6 +80,18 @@ import type { ClaudeStreamMessage } from "./AgentExecution";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useTrackEvent, useComponentMetrics, useWorkflowTracking } from "@/hooks";
 import { SessionPersistenceService } from "@/services/sessionPersistence";
+import { open as openExternal } from "@tauri-apps/plugin-shell";
+
+interface McpElicitationRequest {
+  request_id: string;
+  session_id: string;
+  mcp_server_name: string;
+  message: string;
+  mode?: "url" | "form" | string;
+  url?: string;
+  elicitation_id?: string;
+  requested_schema?: Record<string, unknown>;
+}
 
 interface ClaudeCodeSessionProps {
   /**
@@ -190,6 +206,10 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
     };
   }, []);
   const [forkSessionName, setForkSessionName] = useState("");
+  const [mcpElicitations, setMcpElicitations] = useState<McpElicitationRequest[]>([]);
+  const [openedElicitations, setOpenedElicitations] = useState<Set<string>>(new Set());
+  const [respondingToElicitation, setRespondingToElicitation] = useState(false);
+  const [elicitationError, setElicitationError] = useState<string | null>(null);
   
   // Queued prompts state
   const [queuedPrompts, setQueuedPrompts] = useState<Array<{
@@ -275,6 +295,88 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
   useEffect(() => {
     queuedPromptsRef.current = queuedPrompts;
   }, [queuedPrompts]);
+
+  useEffect(() => {
+    let disposed = false;
+    let unlisten: UnlistenFn | undefined;
+
+    listen(`mcp-elicitation:${tabId}`, (event: { payload: McpElicitationRequest }) => {
+      if (disposed) return;
+      setMcpElicitations((current) => {
+        if (current.some((request) => request.request_id === event.payload.request_id)) {
+          return current;
+        }
+        return [...current, event.payload];
+      });
+      setElicitationError(null);
+    }).then((cleanup) => {
+      if (disposed) cleanup();
+      else unlisten = cleanup;
+    });
+
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, [tabId]);
+
+  const activeMcpElicitation = mcpElicitations[0] ?? null;
+  const hasOpenedActiveElicitation = activeMcpElicitation
+    ? openedElicitations.has(activeMcpElicitation.request_id)
+    : false;
+  const isUrlElicitation = Boolean(
+    activeMcpElicitation?.mode === "url" || activeMcpElicitation?.url,
+  );
+  const activeAuthorizationHost = (() => {
+    if (!activeMcpElicitation?.url) return null;
+    try {
+      return new URL(activeMcpElicitation.url).hostname;
+    } catch {
+      return null;
+    }
+  })();
+
+  const respondToMcpElicitation = async (action: "accept" | "decline" | "cancel") => {
+    if (!activeMcpElicitation || respondingToElicitation) return;
+
+    try {
+      setRespondingToElicitation(true);
+      setElicitationError(null);
+      await invoke("respond_to_mcp_elicitation", {
+        requestId: activeMcpElicitation.request_id,
+        action,
+        content: {},
+      });
+      setMcpElicitations((current) => current.slice(1));
+      setOpenedElicitations((current) => {
+        const next = new Set(current);
+        next.delete(activeMcpElicitation.request_id);
+        return next;
+      });
+    } catch (responseError) {
+      setElicitationError(
+        responseError instanceof Error ? responseError.message : String(responseError),
+      );
+    } finally {
+      setRespondingToElicitation(false);
+    }
+  };
+
+  const openMcpAuthorization = async () => {
+    if (!activeMcpElicitation?.url) return;
+
+    try {
+      const parsedUrl = new URL(activeMcpElicitation.url);
+      if (parsedUrl.protocol !== "https:" && parsedUrl.protocol !== "http:") {
+        throw new Error("This authorization URL uses an unsupported protocol");
+      }
+      await openExternal(activeMcpElicitation.url);
+      setOpenedElicitations((current) => new Set(current).add(activeMcpElicitation.request_id));
+      setElicitationError(null);
+    } catch (openError) {
+      setElicitationError(openError instanceof Error ? openError.message : String(openError));
+    }
+  };
 
   // Get effective session info (from prop or extracted) - use useMemo to ensure it updates
   const effectiveSession = useMemo(() => {
@@ -2055,6 +2157,96 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
           )}
         </AnimatePresence>
       </div>
+
+      <Dialog
+        open={Boolean(activeMcpElicitation)}
+        onOpenChange={(open) => {
+          if (!open) void respondToMcpElicitation("cancel");
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <div className="mb-2 flex h-10 w-10 items-center justify-center rounded-md bg-primary/10 text-primary">
+              <ShieldCheck className="h-5 w-5" />
+            </div>
+            <DialogTitle>Authorization required</DialogTitle>
+            <DialogDescription>
+              {activeMcpElicitation?.mcp_server_name} needs your approval before it can continue.
+            </DialogDescription>
+          </DialogHeader>
+
+          {activeMcpElicitation && (
+            <div className="space-y-4 py-2">
+              <div className="border-l-2 border-primary/50 pl-3">
+                <p className="text-sm text-foreground">{activeMcpElicitation.message}</p>
+                {activeAuthorizationHost && (
+                  <p className="mt-1 truncate text-xs text-muted-foreground">
+                    {activeAuthorizationHost}
+                  </p>
+                )}
+              </div>
+
+              {isUrlElicitation && hasOpenedActiveElicitation && (
+                <p className="text-sm text-muted-foreground">
+                  Complete the authorization in your browser, then confirm below.
+                </p>
+              )}
+
+              {!isUrlElicitation && (
+                <p className="text-sm text-muted-foreground">
+                  This server is requesting additional information before it can continue.
+                </p>
+              )}
+
+              {mcpElicitations.length > 1 && (
+                <p className="text-xs text-muted-foreground">
+                  {mcpElicitations.length - 1} more authorization request{mcpElicitations.length === 2 ? "" : "s"} waiting
+                </p>
+              )}
+
+              {elicitationError && (
+                <p className="text-sm text-destructive">{elicitationError}</p>
+              )}
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => void respondToMcpElicitation("decline")}
+              disabled={respondingToElicitation}
+            >
+              Decline
+            </Button>
+            {isUrlElicitation && hasOpenedActiveElicitation && (
+              <Button
+                variant="outline"
+                onClick={() => void openMcpAuthorization()}
+                disabled={respondingToElicitation}
+              >
+                <ExternalLink className="mr-2 h-4 w-4" />
+                Open again
+              </Button>
+            )}
+            {isUrlElicitation && (
+              <Button
+                onClick={() => {
+                  if (hasOpenedActiveElicitation) void respondToMcpElicitation("accept");
+                  else void openMcpAuthorization();
+                }}
+                disabled={respondingToElicitation || !activeMcpElicitation.url}
+              >
+                {respondingToElicitation ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : hasOpenedActiveElicitation ? null : (
+                  <ExternalLink className="mr-2 h-4 w-4" />
+                )}
+                {hasOpenedActiveElicitation ? "Authorization completed" : "Open authorization"}
+              </Button>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Fork Dialog */}
       <Dialog open={showForkDialog} onOpenChange={setShowForkDialog}>
