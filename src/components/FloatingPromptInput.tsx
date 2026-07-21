@@ -711,11 +711,24 @@ const FloatingPromptInputInner = (
     if (!el) return;
     const observer = new ResizeObserver((entries) => {
       const h = entries[0]?.borderBoxSize?.[0]?.blockSize ?? entries[0]?.contentRect?.height ?? 0;
-      onHeightChangeRef.current?.(Math.ceil(h));
+      const height = Math.ceil(h);
+      onHeightChangeRef.current?.(height);
+      if (isActiveRef.current) {
+        document.documentElement.style.setProperty('--opcode-prompt-bar-height', `${height}px`);
+      }
     });
     observer.observe(el);
     return () => observer.disconnect();
   }, []);
+
+  // The active prompt bar spans the whole window, including the session sidebar.
+  // Publish its current height so other scrolling regions can keep their final
+  // items above it instead of hiding them underneath.
+  useEffect(() => {
+    if (!isActive || !barRootRef.current) return;
+    const height = Math.ceil(barRootRef.current.getBoundingClientRect().height);
+    document.documentElement.style.setProperty('--opcode-prompt-bar-height', `${height}px`);
+  }, [isActive]);
 
   // Set up Tauri drag-drop event listener
   useEffect(() => {

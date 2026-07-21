@@ -345,9 +345,9 @@ function AppContent() {
       
       case "tabs":
         return (
-          <div className="h-full flex flex-col">
+          <div className="h-full min-h-0 flex flex-col">
             <TabManager className="flex-shrink-0" />
-            <div className="flex-1 overflow-hidden flex flex-row">
+            <div className="flex-1 min-h-0 overflow-hidden flex flex-row">
               {/* Session Sidebar */}
               <Sidebar
                 isOpen={showSidebar}

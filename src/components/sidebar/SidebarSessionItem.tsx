@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Pencil, Trash2, Check, X, AlertTriangle, EyeOff, ArchiveRestore, Star } from 'lucide-react';
+import { Pencil, Trash2, Check, X, AlertTriangle, EyeOff, ArchiveRestore, Pin } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import {
   Dialog,
@@ -23,6 +23,7 @@ interface SidebarSessionItemProps {
   isActive: boolean;
   isRunning?: boolean;
   isArchived?: boolean;
+  isPinnedGroup?: boolean;
   displayName: string;
   onClick: () => void;
   onOpenInNewTab: () => void;
@@ -46,6 +47,7 @@ export const SidebarSessionItem: React.FC<SidebarSessionItemProps> = ({
   isActive,
   isRunning = false,
   isArchived = false,
+  isPinnedGroup = false,
   displayName,
   onClick,
   onOpenInNewTab,
@@ -141,7 +143,7 @@ export const SidebarSessionItem: React.FC<SidebarSessionItemProps> = ({
 
       const highlightItem = await MenuItem.new({
         id: isHighlighted ? 'remove-session-highlight' : 'highlight-session',
-        text: isHighlighted ? 'Remove Highlight' : 'Highlight Session',
+        text: isHighlighted ? 'Unpin Session' : 'Pin Session to Top',
         action: () => toggleSessionHighlight(session.id),
       });
 
@@ -322,7 +324,8 @@ export const SidebarSessionItem: React.FC<SidebarSessionItemProps> = ({
         isActive
           ? 'bg-primary/15 text-primary'
           : 'text-muted-foreground hover:text-foreground hover:bg-accent/50',
-        isHighlighted && !isActive && 'bg-amber-500/10 text-foreground hover:bg-amber-500/15 ring-1 ring-inset ring-amber-500/20',
+        isPinnedGroup && 'rounded-none',
+        isHighlighted && !isPinnedGroup && !isActive && 'bg-muted/65 text-foreground hover:bg-muted',
         isArchived && 'opacity-60'
       )}
       onMouseEnter={() => setIsHovered(true)}
@@ -355,6 +358,13 @@ export const SidebarSessionItem: React.FC<SidebarSessionItemProps> = ({
         </div>
       ) : (
         <>
+          {isHighlighted && (
+            <Pin
+              size={9}
+              className="shrink-0 fill-amber-400/20 text-amber-400"
+              aria-label="Pinned session"
+            />
+          )}
           {isRunning && (
             <span
               className="w-2 h-2 rounded-full bg-green-500 shrink-0 shadow-[0_0_4px_rgba(34,197,94,0.6)]"
@@ -367,10 +377,7 @@ export const SidebarSessionItem: React.FC<SidebarSessionItemProps> = ({
             </span>
           )}
           <div className="flex-1 min-w-0 flex items-baseline justify-between gap-1.5 overflow-hidden">
-            <span className={cn(
-              'truncate text-xs text-foreground/90 leading-tight',
-              isHighlighted ? 'font-semibold' : 'font-medium',
-            )}>{displayName}</span>
+            <span className="truncate text-xs font-medium text-foreground/90 leading-tight">{displayName}</span>
             <span className="shrink-0 text-[10px] text-muted-foreground/60 leading-tight ml-auto">{relativeTime}</span>
           </div>
 
@@ -394,10 +401,10 @@ export const SidebarSessionItem: React.FC<SidebarSessionItemProps> = ({
                     ? 'fill-amber-400 text-amber-400 hover:text-amber-300'
                     : 'text-muted-foreground hover:text-foreground',
                 )}
-                title={isHighlighted ? 'Remove highlight' : 'Highlight session'}
-                aria-label={isHighlighted ? 'Remove highlight' : 'Highlight session'}
+                title={isHighlighted ? 'Unpin session' : 'Pin session to top'}
+                aria-label={isHighlighted ? 'Unpin session' : 'Pin session to top'}
               >
-                <Star size={11} />
+                <Pin size={11} />
               </button>
               {isArchived ? (
                 <button
