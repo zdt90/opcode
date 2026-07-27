@@ -126,7 +126,8 @@ const getToolSummary = (name: string | undefined, input: any): ToolSummary => {
 
 /**
  * A fenced code block rendered with syntax highlighting and a copy-to-clipboard
- * button shown on hover. Only used for block-level code, not inline code.
+ * button shown on hover. Used for every block-level code span, including
+ * unlabelled plain-text output; inline code is left untouched.
  */
 const CodeBlock: React.FC<{
   language: string;
@@ -171,11 +172,11 @@ function markdownComponents(syntaxTheme: any) {
   return {
     code({ node, inline, className, children, ...props }: any) {
       const match = /language-(\w+)/.exec(className || '');
-      // Block-level code (fenced, with a language) gets syntax highlighting and
-      // a copy button. Inline code is left untouched.
-      return !inline && match ? (
+      // Every fenced block gets the same copy affordance. A missing language is
+      // treated as plain text so raw tool output remains easy to copy.
+      return !inline ? (
         <CodeBlock
-          language={match[1]}
+          language={match?.[1] || 'text'}
           value={String(children).replace(/\n$/, '')}
           syntaxTheme={syntaxTheme}
         />
