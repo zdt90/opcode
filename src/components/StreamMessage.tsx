@@ -170,17 +170,31 @@ const CodeBlock: React.FC<{
 
 function markdownComponents(syntaxTheme: any) {
   return {
-    code({ node, inline, className, children, ...props }: any) {
-      const match = /language-(\w+)/.exec(className || '');
-      // Every fenced block gets the same copy affordance. A missing language is
-      // treated as plain text so raw tool output remains easy to copy.
-      return !inline ? (
-        <CodeBlock
-          language={match?.[1] || 'text'}
-          value={String(children).replace(/\n$/, '')}
-          syntaxTheme={syntaxTheme}
-        />
-      ) : (
+    pre({ node, children, ...props }: any) {
+      const codeNode = node?.children?.find(
+        (child: any) => child.type === "element" && child.tagName === "code"
+      );
+
+      if (!codeNode) {
+        return <pre {...props}>{children}</pre>;
+      }
+
+      const className = Array.isArray(codeNode.properties?.className)
+        ? codeNode.properties.className.join(" ")
+        : codeNode.properties?.className || "";
+      const match = /language-(\w+)/.exec(className);
+      const value = codeNode.children
+        .map((child: any) => child.value || "")
+        .join("")
+        .replace(/\n$/, "");
+
+      // Block-level code is represented by a `pre > code` pair in the HAST
+      // tree. Rendering at the `pre` level avoids mistaking inline code for a
+      // copyable block in react-markdown v9.
+      return <CodeBlock language={match?.[1] || "text"} value={value} syntaxTheme={syntaxTheme} />;
+    },
+    code({ className, children, ...props }: any) {
+      return (
         <code className={className} {...props}>
           {children}
         </code>
