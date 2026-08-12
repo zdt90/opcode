@@ -9,6 +9,7 @@ import { cn } from '@/lib/utils';
 import { apiCall } from '@/lib/apiAdapter';
 import { SidebarProjectItem } from './SidebarProjectItem';
 import type { Project, Session } from '@/lib/api';
+import { getAutoCorrectionAttributes, useInputBehavior } from '@/contexts/InputBehaviorContext';
 
 interface SidebarProps {
   onSessionSelect: (session: Session, projectPath: string, displayName: string) => void;
@@ -52,6 +53,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const isDraggingRef = useRef(false);
   const dragStartXRef = useRef(0);
   const dragStartWidthRef = useRef(0);
+  const { autoCorrect } = useInputBehavior();
 
   const loadProjects = async () => {
     setLoading(true);
@@ -249,6 +251,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               <Search size={13} className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground" />
               <input
                 type="search"
+                {...getAutoCorrectionAttributes(autoCorrect)}
                 value={sessionSearchQuery}
                 onChange={(event) => handleSearchQueryChange(event.target.value)}
                 placeholder="Search sessions"

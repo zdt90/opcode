@@ -4,7 +4,7 @@ import { api } from '../lib/api';
 const AUTOCORRECT_KEY = 'input_autocorrect';
 
 interface InputBehaviorContextType {
-  /** When true (default), OS-level auto-correction is enabled in the prompt textarea. */
+  /** When true (default), OS-level auto-correction is enabled in text inputs. */
   autoCorrect: boolean;
   setAutoCorrect: (value: boolean) => Promise<void>;
   isLoading: boolean;
@@ -47,4 +47,12 @@ export const useInputBehavior = () => {
   if (!ctx) throw new Error('useInputBehavior must be used within InputBehaviorProvider');
   return ctx;
 };
+
+export const useOptionalInputBehavior = () => useContext(InputBehaviorContext);
+
+export const getAutoCorrectionAttributes = (autoCorrect: boolean) => ({
+  autoCorrect: autoCorrect ? 'on' : 'off',
+  autoCapitalize: autoCorrect ? 'on' : 'off',
+  spellCheck: autoCorrect,
+});
 
