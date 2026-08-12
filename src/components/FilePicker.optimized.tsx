@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import type { FileEntry } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { getAutoCorrectionAttributes, useInputBehavior } from "@/contexts/InputBehaviorContext";
 
 // Global caches that persist across component instances
 const globalDirectoryCache = new Map<string, FileEntry[]>();
@@ -88,6 +89,7 @@ export const FilePicker: React.FC<FilePickerProps> = React.memo(({
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const { autoCorrect } = useInputBehavior();
   
   const searchInputRef = useRef<HTMLInputElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -286,6 +288,7 @@ export const FilePicker: React.FC<FilePickerProps> = React.memo(({
           <input
             ref={searchInputRef}
             type="text"
+            {...getAutoCorrectionAttributes(autoCorrect)}
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Search files..."
