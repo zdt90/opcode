@@ -16,7 +16,7 @@ interface SidebarProjectItemProps {
   project: ProjectItem;
   activeSessionId?: string;
   activeProjectId?: string;
-  runningSessionIds?: Set<string>;
+  runningSessionIds?: ReadonlySet<string>;
   onSessionSelect: (session: Session, projectPath: string, displayName: string) => void;
   onSessionSelectNewTab: (session: Session, projectPath: string, displayName: string) => void;
   onNewSession: (projectPath: string, name?: string) => void;
