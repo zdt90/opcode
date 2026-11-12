@@ -361,9 +361,19 @@ function AppContent() {
                 activeProjectId={activeProjectId}
                 runningSessionIds={runningSessionIds}
                 onSessionSelect={(session: Session, projectPath: string, displayName: string) => {
+                  const shouldOpenInNewTab = activeTab?.type === 'chat'
+                    && activeSessionId !== undefined
+                    && activeSessionId !== session.id
+                    && runningSessionIds.has(activeSessionId);
+
                   window.dispatchEvent(
                     new CustomEvent('claude-session-selected', {
-                      detail: { session, projectPath, displayName },
+                      detail: {
+                        session,
+                        projectPath,
+                        displayName,
+                        openInNewTab: shouldOpenInNewTab,
+                      },
                     })
                   );
                 }}
