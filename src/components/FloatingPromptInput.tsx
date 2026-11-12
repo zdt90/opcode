@@ -384,6 +384,8 @@ const MODEL_ICONS: Record<ModelId, React.ReactNode> = {
   "claude-opus-4-6": <Sparkles className="h-3.5 w-3.5" />,
   "claude-opus-4-7": <Rocket className="h-3.5 w-3.5" />,
   "claude-opus-4-8": <Rocket className="h-3.5 w-3.5" />,
+  "claude-opus-5": <Rocket className="h-3.5 w-3.5" />,
+  "claude-opus-5-5": <Rocket className="h-3.5 w-3.5" />,
   "claude-fable-5": <Crown className="h-3.5 w-3.5" />,
 };
 
@@ -394,6 +396,8 @@ const MODEL_COLORS: Record<ModelId, string> = {
   "claude-opus-4-6": "text-primary",
   "claude-opus-4-7": "text-amber-500",
   "claude-opus-4-8": "text-amber-500",
+  "claude-opus-5": "text-amber-500",
+  "claude-opus-5-5": "text-amber-500",
   "claude-fable-5": "text-amber-500",
 };
 
