@@ -9,13 +9,22 @@ import { useTrackEvent } from '@/hooks';
 interface TabItemProps {
   tab: Tab;
   isActive: boolean;
+  isSessionRunning?: boolean;
   onClose: (id: string) => void;
   onClick: (id: string) => void;
   isDragging?: boolean;
   setDraggedTabId?: (id: string | null) => void;
 }
 
-const TabItem: React.FC<TabItemProps> = ({ tab, isActive, onClose, onClick, isDragging = false, setDraggedTabId }) => {
+const TabItem: React.FC<TabItemProps> = ({
+  tab,
+  isActive,
+  isSessionRunning = false,
+  onClose,
+  onClick,
+  isDragging = false,
+  setDraggedTabId,
+}) => {
   const [isHovered, setIsHovered] = useState(false);
   
   const getIcon = () => {
@@ -96,8 +105,14 @@ const TabItem: React.FC<TabItemProps> = ({ tab, isActive, onClose, onClick, isDr
       </div>
       
       {/* Tab Title */}
-      <span className="flex-1 truncate text-xs font-medium min-w-0">
-        {tab.title}
+      <span className="flex-1 flex items-center gap-1.5 text-xs font-medium min-w-0">
+        {isSessionRunning && (
+          <span
+            className="w-2 h-2 rounded-full bg-green-500 shrink-0 shadow-[0_0_4px_rgba(34,197,94,0.6)]"
+            title="Session is running"
+          />
+        )}
+        <span className="truncate">{tab.title}</span>
       </span>
 
       {/* Status Indicators - always takes up space */}
@@ -140,9 +155,10 @@ const TabItem: React.FC<TabItemProps> = ({ tab, isActive, onClose, onClick, isDr
 
 interface TabManagerProps {
   className?: string;
+  runningSessionIds?: ReadonlySet<string>;
 }
 
-export const TabManager: React.FC<TabManagerProps> = ({ className }) => {
+export const TabManager: React.FC<TabManagerProps> = ({ className, runningSessionIds }) => {
   const {
     tabs,
     activeTabId,
@@ -357,6 +373,11 @@ export const TabManager: React.FC<TabManagerProps> = ({ className }) => {
                 key={tab.id}
                 tab={tab}
                 isActive={tab.id === activeTabId}
+                isSessionRunning={
+                  tab.type === 'chat'
+                  && tab.sessionId !== undefined
+                  && runningSessionIds?.has(tab.sessionId) === true
+                }
                 onClose={handleCloseTab}
                 onClick={switchToTab}
                 isDragging={draggedTabId === tab.id}

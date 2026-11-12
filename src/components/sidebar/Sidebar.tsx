@@ -18,6 +18,7 @@ interface SidebarProps {
   onOpenProject?: () => void;
   activeSessionId?: string;
   activeProjectId?: string;
+  runningSessionIds?: ReadonlySet<string>;
   isOpen: boolean;
   onToggle: () => void;
   className?: string;
@@ -26,7 +27,6 @@ interface SidebarProps {
 const SIDEBAR_WIDTH_DEFAULT = 260;
 const SIDEBAR_WIDTH_MIN = 180;
 const SIDEBAR_WIDTH_MAX = 480;
-const RUNNING_SESSIONS_POLL_INTERVAL = 5000;
 const SESSIONS_AUTO_REFRESH_INTERVAL = 30000;
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -36,6 +36,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onOpenProject,
   activeSessionId,
   activeProjectId,
+  runningSessionIds,
   isOpen,
   onToggle,
   className,
@@ -43,13 +44,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [runningSessionIds, setRunningSessionIds] = useState<Set<string>>(new Set());
   const [reloadSignal, setReloadSignal] = useState(0);
   const [silentReloadSignal, setSilentReloadSignal] = useState(0);
   const [sidebarWidth, setSidebarWidth] = useState(SIDEBAR_WIDTH_DEFAULT);
   const [sessionSearchQuery, setSessionSearchQuery] = useState('');
   const [searchResultCounts, setSearchResultCounts] = useState<Record<string, number>>({});
-  const pollingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const isDraggingRef = useRef(false);
   const dragStartXRef = useRef(0);
   const dragStartWidthRef = useRef(0);
@@ -70,37 +69,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
     }
   };
 
-  const pollRunningSessions = async () => {
-    try {
-      const claudeRuns = await apiCall<Array<{ process_type: { ClaudeSession?: { session_id: string } } }>>('list_running_claude_sessions');
-      const ids = new Set(
-        claudeRuns
-          .map((r) => r.process_type?.ClaudeSession?.session_id)
-          .filter((id): id is string => Boolean(id))
-      );
-      setRunningSessionIds(ids);
-    } catch {
-      // Polling failures are non-fatal; ignore and retry on the next interval
-    }
-  };
-
   useEffect(() => {
     if (isOpen) {
       loadProjects();
-      pollRunningSessions();
-      pollingIntervalRef.current = setInterval(pollRunningSessions, RUNNING_SESSIONS_POLL_INTERVAL);
-    } else {
-      if (pollingIntervalRef.current !== null) {
-        clearInterval(pollingIntervalRef.current);
-        pollingIntervalRef.current = null;
-      }
     }
-    return () => {
-      if (pollingIntervalRef.current !== null) {
-        clearInterval(pollingIntervalRef.current);
-        pollingIntervalRef.current = null;
-      }
-    };
   }, [isOpen]);
 
   // Periodically refresh sessions in the background so each session's "last

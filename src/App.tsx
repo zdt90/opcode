@@ -26,7 +26,7 @@ import { ProjectSettings } from '@/components/ProjectSettings';
 import { TabManager } from "@/components/TabManager";
 import { TabContent } from "@/components/TabContent";
 import { useTabState } from "@/hooks/useTabState";
-import { useAppLifecycle, useTrackEvent } from "@/hooks";
+import { useAppLifecycle, useRunningSessionIds, useTrackEvent } from "@/hooks";
 import { StartupIntro } from "@/components/StartupIntro";
 import { Sidebar, SidebarToggleButton } from "@/components/sidebar/Sidebar";
 
@@ -69,6 +69,7 @@ function AppContent() {
   const [projectForSettings, setProjectForSettings] = useState<Project | null>(null);
   const [previousView] = useState<View>("welcome");
   const [showSidebar, setShowSidebar] = useState(true);
+  const runningSessionIds = useRunningSessionIds(view === "tabs");
   
   // Initialize analytics lifecycle tracking
   useAppLifecycle();
@@ -346,7 +347,10 @@ function AppContent() {
       case "tabs":
         return (
           <div className="h-full min-h-0 flex flex-col">
-            <TabManager className="flex-shrink-0" />
+            <TabManager
+              className="flex-shrink-0"
+              runningSessionIds={runningSessionIds}
+            />
             <div className="flex-1 min-h-0 overflow-hidden flex flex-row">
               {/* Session Sidebar */}
               <Sidebar
@@ -355,6 +359,7 @@ function AppContent() {
                 onOpenProject={handleOpenProject}
                 activeSessionId={activeSessionId}
                 activeProjectId={activeProjectId}
+                runningSessionIds={runningSessionIds}
                 onSessionSelect={(session: Session, projectPath: string, displayName: string) => {
                   window.dispatchEvent(
                     new CustomEvent('claude-session-selected', {
