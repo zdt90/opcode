@@ -564,16 +564,20 @@ export const TabContent: React.FC = () => {
     const handleClaudeSessionSelected = (event: CustomEvent) => {
       const { session, openInNewTab, displayName } = event.detail;
       const title = makeTabTitle(session, displayName);
+      const existingTab = tabsRef.current.find(
+        tab => tab.type === 'chat' && tab.sessionId === session.id
+      );
 
-      if (openInNewTab) {
-        const existingTab = findTabBySessionId(session.id);
-        if (existingTab) {
-          updateTab(existingTab.id, { sessionData: session, title });
-          window.dispatchEvent(new CustomEvent('switch-to-tab', { detail: { tabId: existingTab.id } }));
-        } else {
-          const newTabId = createChatTab(session.id, title, session.project_path);
-          updateTab(newTabId, { sessionData: session, initialProjectPath: session.project_path });
-        }
+      if (existingTab) {
+        updateTab(existingTab.id, {
+          sessionData: session,
+          title,
+          initialProjectPath: session.project_path,
+        });
+        window.dispatchEvent(new CustomEvent('switch-to-tab', { detail: { tabId: existingTab.id } }));
+      } else if (openInNewTab) {
+        const newTabId = createChatTab(session.id, title, session.project_path);
+        updateTab(newTabId, { sessionData: session, initialProjectPath: session.project_path });
       } else {
         // Use refs to get the latest tabs/activeTabId — the closure captured by
         // this handler is stale if tabs changed after this useEffect last ran.
