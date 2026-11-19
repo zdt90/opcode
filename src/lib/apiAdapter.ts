@@ -256,6 +256,7 @@ function mapCommandToEndpoint(command: string, _params?: any): string {
 
     // Session metadata (opcode-specific)
     'delete_session': '/api/sessions/{sessionId}/delete',
+    'fork_session': '/api/sessions/{sessionId}/fork/{projectId}',
     'rename_session': '/api/sessions/{sessionId}/rename',
     'get_session_name': '/api/sessions/{sessionId}/name',
     

@@ -21,7 +21,7 @@ use commands::claude::{
     cancel_claude_execution, check_auto_checkpoint, check_claude_version, cleanup_old_checkpoints,
     clear_checkpoint_manager, continue_claude_code, create_checkpoint, create_project,
     archive_session, delete_session, execute_claude_code, find_claude_md_files,
-    fork_from_checkpoint, get_archived_sessions, open_devtools,
+    fork_from_checkpoint, fork_session, get_archived_sessions, open_devtools,
     reveal_path_in_finder, get_session_jsonl_path,
     get_checkpoint_diff, get_checkpoint_settings, get_checkpoint_state_stats,
     get_claude_session_output, get_claude_settings, get_home_directory, get_hooks_config,
@@ -323,6 +323,7 @@ fn main() {
             validate_hook_command,
             // Session metadata
             delete_session,
+            fork_session,
             rename_session,
             get_session_name,
             archive_session,
