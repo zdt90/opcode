@@ -33,6 +33,16 @@ function getProjectBaseName(path: string): string {
   return parts[parts.length - 1] || path;
 }
 
+function getForkSessionName(sourceName: string, existingNames: string[]): string {
+  const baseName = (sourceName.match(/^(.*)\(\d+\)$/)?.[1] ?? sourceName).trimEnd();
+  const existing = new Set(existingNames);
+
+  for (let index = 1; ; index += 1) {
+    const candidate = `${baseName}(${index})`;
+    if (!existing.has(candidate)) return candidate;
+  }
+}
+
 export const SidebarProjectItem: React.FC<SidebarProjectItemProps> = ({
   project,
   activeSessionId,
@@ -178,6 +188,30 @@ export const SidebarProjectItem: React.FC<SidebarProjectItemProps> = ({
     setSessionNames((prev) => ({ ...prev, [sessionId]: newName }));
   };
 
+  const handleForkSession = async (session: Session, displayName: string) => {
+    const forkName = getForkSessionName(displayName, sessions.map((s) => getDisplayName(s)));
+
+    try {
+      const forkedSession = await apiCall<Session>('fork_session', {
+        projectId: project.id,
+        sessionId: session.id,
+        name: forkName,
+      });
+
+      setSessions((prev) => [forkedSession, ...prev.filter((s) => s.id !== forkedSession.id)]);
+      setSessionNames((prev) => ({ ...prev, [forkedSession.id]: forkName }));
+      setArchivedIds((prev) => {
+        const next = new Set(prev);
+        next.delete(forkedSession.id);
+        return next;
+      });
+      onSessionSelectNewTab(forkedSession, project.path, forkName);
+      window.dispatchEvent(new CustomEvent('opcode-refresh-sessions'));
+    } catch (err) {
+      console.error('[SidebarProjectItem] Failed to fork session:', err);
+    }
+  };
+
   const handleArchiveSession = (sessionId: string) => {
     setArchivedIds((prev) => new Set([...prev, sessionId]));
   };
@@ -287,6 +321,7 @@ export const SidebarProjectItem: React.FC<SidebarProjectItemProps> = ({
       onRefreshSessions={() => loadSessions(true)}
       onDelete={handleDeleteSession}
       onRename={handleRenameSession}
+      onFork={() => handleForkSession(session, getDisplayName(session))}
       onArchive={handleArchiveSession}
       onUnarchive={handleUnarchiveSession}
     />

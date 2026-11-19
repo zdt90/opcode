@@ -30,6 +30,7 @@ interface SidebarSessionItemProps {
   onRefreshSessions: () => void;
   onDelete: (sessionId: string) => void;
   onRename: (sessionId: string, newName: string) => void;
+  onFork: () => void;
   onArchive: (sessionId: string) => void;
   onUnarchive: (sessionId: string) => void;
 }
@@ -54,6 +55,7 @@ export const SidebarSessionItem: React.FC<SidebarSessionItemProps> = ({
   onRefreshSessions,
   onDelete,
   onRename,
+  onFork,
   onArchive,
   onUnarchive,
 }) => {
@@ -96,6 +98,12 @@ export const SidebarSessionItem: React.FC<SidebarSessionItemProps> = ({
         id: 'open-in-new-tab',
         text: 'Open in New Tab',
         action: () => onOpenInNewTab(),
+      });
+
+      const forkItem = await MenuItem.new({
+        id: 'fork-session',
+        text: 'Fork Session',
+        action: () => onFork(),
       });
 
       const copyIdItem = await MenuItem.new({
@@ -177,6 +185,7 @@ export const SidebarSessionItem: React.FC<SidebarSessionItemProps> = ({
 
       const menuItems: any[] = [
         openInNewTabItem,
+        forkItem,
         copyIdItem,
         revealJsonlItem,
         sep1,

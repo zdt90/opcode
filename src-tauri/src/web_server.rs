@@ -1,7 +1,7 @@
 use axum::extract::ws::{Message, WebSocket};
 use axum::http::Method;
 use axum::{
-    extract::{Path, State as AxumState, WebSocketUpgrade},
+    extract::{Path, Query, State as AxumState, WebSocketUpgrade},
     response::{Html, Json, Response},
     routing::get,
     Router,
@@ -207,6 +207,24 @@ async fn load_session_history(
 ) -> Json<ApiResponse<Vec<serde_json::Value>>> {
     match commands::claude::load_session_history(session_id, project_id).await {
         Ok(history) => Json(ApiResponse::success(history)),
+        Err(e) => Json(ApiResponse::error(e.to_string())),
+    }
+}
+
+#[derive(Deserialize)]
+struct ForkSessionQuery {
+    name: Option<String>,
+}
+
+/// Fork a session by copying its JSONL file into a new session.
+async fn fork_session(
+    Path((session_id, project_id)): Path<(String, String)>,
+    Query(query): Query<ForkSessionQuery>,
+) -> Json<ApiResponse<commands::claude::Session>> {
+    match commands::claude::fork_session(project_id, session_id, query.name.unwrap_or_default())
+        .await
+    {
+        Ok(session) => Json(ApiResponse::success(session)),
         Err(e) => Json(ApiResponse::error(e.to_string())),
     }
 }
@@ -806,6 +824,10 @@ pub async fn create_web_server(port: u16) -> Result<(), Box<dyn std::error::Erro
         .route(
             "/api/sessions/{session_id}/history/{project_id}",
             get(load_session_history),
+        )
+        .route(
+            "/api/sessions/{session_id}/fork/{project_id}",
+            get(fork_session),
         )
         .route("/api/sessions/running", get(list_running_claude_sessions))
         // Claude execution endpoints (read-only in web mode)

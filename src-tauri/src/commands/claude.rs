@@ -2457,6 +2457,142 @@ fn write_opcode_metadata(map: &serde_json::Map<String, serde_json::Value>) -> Re
     fs::write(&path, json).map_err(|e| format!("Failed to write opcode-metadata.json: {}", e))
 }
 
+fn rewrite_session_id_in_jsonl(content: &str, new_session_id: &str) -> String {
+    let mut rewritten_lines = Vec::new();
+
+    for line in content.lines() {
+        if line.trim().is_empty() {
+            rewritten_lines.push(line.to_string());
+            continue;
+        }
+
+        match serde_json::from_str::<serde_json::Value>(line) {
+            Ok(mut value) => {
+                if let Some(object) = value.as_object_mut() {
+                    object.insert(
+                        "sessionId".to_string(),
+                        serde_json::Value::String(new_session_id.to_string()),
+                    );
+                }
+
+                rewritten_lines
+                    .push(serde_json::to_string(&value).unwrap_or_else(|_| line.to_string()));
+            }
+            Err(_) => rewritten_lines.push(line.to_string()),
+        }
+    }
+
+    let mut rewritten = rewritten_lines.join("\n");
+    if content.ends_with('\n') {
+        rewritten.push('\n');
+    }
+    rewritten
+}
+
+/// Forks an existing session by copying its JSONL history into a new session file.
+#[tauri::command]
+pub async fn fork_session(
+    project_id: String,
+    session_id: String,
+    name: String,
+) -> Result<Session, String> {
+    log::info!("Forking session {} in project {}", session_id, project_id);
+
+    let claude_dir = get_claude_dir().map_err(|e| e.to_string())?;
+    let project_dir = claude_dir.join("projects").join(&project_id);
+    let source_session_path = project_dir.join(format!("{}.jsonl", session_id));
+
+    if !source_session_path.exists() {
+        return Err(format!("Session file not found: {}", session_id));
+    }
+
+    let mut new_session_id = uuid::Uuid::new_v4().to_string();
+    let mut new_session_path = project_dir.join(format!("{}.jsonl", new_session_id));
+    while new_session_path.exists() {
+        new_session_id = uuid::Uuid::new_v4().to_string();
+        new_session_path = project_dir.join(format!("{}.jsonl", new_session_id));
+    }
+
+    let source_content = fs::read_to_string(&source_session_path)
+        .map_err(|e| format!("Failed to read source session file: {}", e))?;
+    let forked_content = rewrite_session_id_in_jsonl(&source_content, &new_session_id);
+    fs::write(&new_session_path, forked_content)
+        .map_err(|e| format!("Failed to write forked session file: {}", e))?;
+
+    let todos_dir = claude_dir.join("todos");
+    let source_todo_path = todos_dir.join(format!("{}.json", session_id));
+    if source_todo_path.exists() {
+        let new_todo_path = todos_dir.join(format!("{}.json", new_session_id));
+        if let Err(e) = fs::copy(&source_todo_path, &new_todo_path) {
+            log::warn!(
+                "Failed to copy todo data from {:?} to {:?}: {}",
+                source_todo_path,
+                new_todo_path,
+                e
+            );
+        }
+    }
+
+    let trimmed_name = name.trim();
+    if !trimmed_name.is_empty() {
+        let mut meta = read_opcode_metadata();
+        meta.insert(
+            new_session_id.clone(),
+            serde_json::Value::String(trimmed_name.to_string()),
+        );
+        write_opcode_metadata(&meta)?;
+    }
+
+    let project_path = match get_project_path_from_sessions(&project_dir) {
+        Ok(path) => path,
+        Err(e) => {
+            log::warn!(
+                "Failed to get project path from sessions for {}: {}, falling back to decode",
+                project_id,
+                e
+            );
+            decode_project_path(&project_id)
+        }
+    };
+
+    let metadata = fs::metadata(&new_session_path)
+        .map_err(|e| format!("Failed to read forked session metadata: {}", e))?;
+    let created_at = metadata
+        .created()
+        .or_else(|_| metadata.modified())
+        .unwrap_or(SystemTime::UNIX_EPOCH)
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let last_updated_at = metadata
+        .modified()
+        .unwrap_or(SystemTime::UNIX_EPOCH)
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let (first_message, message_timestamp) = extract_first_user_message(&new_session_path);
+
+    let todo_path = todos_dir.join(format!("{}.json", new_session_id));
+    let todo_data = if todo_path.exists() {
+        fs::read_to_string(&todo_path)
+            .ok()
+            .and_then(|content| serde_json::from_str(&content).ok())
+    } else {
+        None
+    };
+
+    Ok(Session {
+        id: new_session_id,
+        project_id,
+        project_path,
+        todo_data,
+        created_at,
+        last_updated_at,
+        first_message,
+        message_timestamp,
+    })
+}
+
 /// Deletes a session: removes the `.jsonl` file and any same-name subdirectory
 /// under `~/.claude/projects/<project_id>/`, cleans up opcode-metadata.json,
 /// and strips matching entries from `~/.claude/history.jsonl` so that other
@@ -2818,6 +2954,24 @@ mod tests {
     fn test_session_control_args_rejects_unknown_values() {
         assert!(session_control_args(false, "edit", "auto").is_err());
         assert!(session_control_args(false, "default", "extreme").is_err());
+    }
+
+    #[test]
+    fn test_rewrite_session_id_in_jsonl_updates_object_lines() {
+        let content = concat!(
+            r#"{"type":"user","sessionId":"old-session","message":{"role":"user"}}"#,
+            "\n",
+            "not json",
+            "\n",
+        );
+
+        let rewritten = rewrite_session_id_in_jsonl(content, "new-session");
+        let mut lines = rewritten.lines();
+        let first: serde_json::Value = serde_json::from_str(lines.next().unwrap()).unwrap();
+
+        assert_eq!(first["sessionId"], "new-session");
+        assert_eq!(lines.next(), Some("not json"));
+        assert!(rewritten.ends_with('\n'));
     }
 
     /// Helper function to create a test session file
